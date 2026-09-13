@@ -1,0 +1,6 @@
+CREATE TABLE game_controls (
+  game_id TEXT PRIMARY KEY NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  mode TEXT NOT NULL,
+  in_flight INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);

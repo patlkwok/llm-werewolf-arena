@@ -1,0 +1,32 @@
+# dependencies
+/node_modules
+
+# Next.js
+/.next
+/out
+
+# tests
+/coverage
+/playwright-report
+/test-results
+
+# local-only project instructions and specifications (kept on disk for Codex)
+*.md
+!/README.md
+/docs/
+
+# local game history, SQLite sidecars, and secrets
+/data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+.env*
+!/.env.example
+
+# system/editor
+.DS_Store
+Thumbs.db
+*.tsbuildinfo

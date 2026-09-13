@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["action", "message"],
+  "properties": {
+    "action": {
+      "const": "final_words"
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
