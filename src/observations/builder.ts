@@ -1,6 +1,5 @@
 import { EventVisibility, type GameEvent } from "@/game-engine/events";
 import { getPendingAction } from "@/game-engine/engine";
-import { PLAYER_COUNT, V1_ROLE_COUNTS } from "@/game-engine/setup";
 import {
   type GamePlayer,
   type GameState,
@@ -163,6 +162,18 @@ export function buildPlayerObservation(
     )
     .map(projectPrivateEvent);
   const pending = getPendingAction(state);
+  const initialRoleCounts = state.players.reduce<Record<Role, number>>(
+    (counts, candidate) => {
+      counts[candidate.role] += 1;
+      return counts;
+    },
+    {
+      [Role.WEREWOLF]: 0,
+      [Role.SEER]: 0,
+      [Role.DOCTOR]: 0,
+      [Role.VILLAGER]: 0,
+    },
+  );
 
   return {
     authoritative: {
@@ -170,8 +181,8 @@ export function buildPlayerObservation(
       playerId,
       ownRole: player.role,
       ownSeat: player.seat,
-      initialPlayerCount: PLAYER_COUNT,
-      initialRoleCounts: { ...V1_ROLE_COUNTS },
+      initialPlayerCount: state.players.length,
+      initialRoleCounts,
       phase: state.phase,
       nightNumber: state.nightNumber,
       dayNumber: state.dayNumber,

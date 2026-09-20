@@ -2,7 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DEFAULT_PLAYER_NAMES, setupSubmissionSchema } from "./setup";
+import {
+  DEFAULT_PLAYER_COUNT,
+  MAX_PLAYER_COUNT,
+  MIN_PLAYER_COUNT,
+} from "@/game-engine/setup";
+import {
+  DEFAULT_PLAYER_NAMES,
+  roleDistributionLabel,
+  setupSubmissionSchema,
+} from "./setup";
 
 interface ModelOption {
   id: string;
@@ -66,7 +75,10 @@ export function ArenaSetup() {
     "loading",
   );
   const [players, setPlayers] = useState<PlayerDraft[]>(
-    DEFAULT_PLAYER_NAMES.map((displayName) => ({ displayName, modelId: "" })),
+    DEFAULT_PLAYER_NAMES.slice(0, DEFAULT_PLAYER_COUNT).map((displayName) => ({
+      displayName,
+      modelId: "",
+    })),
   );
   const [rules, setRules] = useState(DEFAULT_RULE_STATE);
   const [formError, setFormError] = useState<string | null>(null);
@@ -131,6 +143,29 @@ export function ArenaSetup() {
       current.map((player, playerIndex) =>
         playerIndex === index ? { ...player, ...update } : player,
       ),
+    );
+    setFormError(null);
+  }
+
+  function addPlayer() {
+    setPlayers((current) => {
+      if (current.length >= MAX_PLAYER_COUNT) return current;
+      return [
+        ...current,
+        {
+          displayName:
+            DEFAULT_PLAYER_NAMES[current.length] ??
+            `Player ${current.length + 1}`,
+          modelId: models[0]?.id ?? "",
+        },
+      ];
+    });
+    setFormError(null);
+  }
+
+  function removePlayer() {
+    setPlayers((current) =>
+      current.length > MIN_PLAYER_COUNT ? current.slice(0, -1) : current,
     );
     setFormError(null);
   }
@@ -256,6 +291,28 @@ export function ArenaSetup() {
             );
           })}
         </div>
+        <div className="player-count-bar">
+          <p aria-live="polite">
+            {players.length} players · Minimum {MIN_PLAYER_COUNT}, maximum{" "}
+            {MAX_PLAYER_COUNT}
+          </p>
+          <div>
+            <button
+              type="button"
+              disabled={players.length <= MIN_PLAYER_COUNT}
+              onClick={removePlayer}
+            >
+              Remove player
+            </button>
+            <button
+              type="button"
+              disabled={players.length >= MAX_PLAYER_COUNT}
+              onClick={addPlayer}
+            >
+              Add player
+            </button>
+          </div>
+        </div>
         <p className="quiet-note">
           Models are routing choices only. Players never learn which models sit
           at the table, and the same model may occupy multiple seats.
@@ -269,7 +326,7 @@ export function ArenaSetup() {
             <h2 id="rules-heading">Choose the house rules</h2>
           </div>
           <p className="fixed-rules">
-            Fixed: 8 seats · 2 discussion rounds · Night 0
+            Fixed: {players.length} seats · 2 discussion rounds · Night 0
           </p>
         </div>
         <div className="rule-grid">
@@ -298,7 +355,7 @@ export function ArenaSetup() {
       <footer className="launch-bar">
         <div>
           <p>Roles are assigned only after launch.</p>
-          <span>2 Werewolves · Seer · Doctor · 4 Villagers</span>
+          <span>{roleDistributionLabel(players.length)}</span>
         </div>
         {formError && (
           <p className="form-error" role="alert">

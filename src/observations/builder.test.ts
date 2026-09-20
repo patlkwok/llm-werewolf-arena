@@ -45,7 +45,7 @@ function privateNightState() {
 }
 
 describe("player observation builder", () => {
-  it("shares the fixed starting role counts with every role without revealing hidden assignments", () => {
+  it("shares the starting role counts with every role without revealing hidden assignments", () => {
     const state = testGame({ gameId: "public-role-counts" });
     for (const player of state.players) {
       const observation = buildPlayerObservation(state, player.id);
@@ -86,6 +86,23 @@ describe("player observation builder", () => {
         ).not.toContain("teammatePlayerIds");
       }
     }
+  });
+
+  it("derives variable starting counts from the authoritative players", () => {
+    const created = createGame(standardSetups(12), { seed: 20260910 });
+    if (!created.ok) throw new Error(created.error.message);
+    const observation = buildPlayerObservation(
+      created.value,
+      created.value.players[0]!.id,
+    );
+
+    expect(observation.authoritative.initialPlayerCount).toBe(12);
+    expect(observation.authoritative.initialRoleCounts).toEqual({
+      WEREWOLF: 3,
+      SEER: 1,
+      DOCTOR: 1,
+      VILLAGER: 7,
+    });
   });
 
   it("gives a Villager public state without hidden facts or operator data", () => {

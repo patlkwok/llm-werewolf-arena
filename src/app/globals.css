@@ -359,6 +359,45 @@ select:disabled {
   font-size: 0.66rem;
 }
 
+.player-count-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.9rem;
+}
+
+.player-count-bar p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.player-count-bar > div {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.player-count-bar button {
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
+.player-count-bar button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.player-count-bar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .quiet-note,
 .fixed-rules {
   margin: 1rem 0 0;
@@ -575,6 +614,11 @@ select:disabled {
     align-items: start;
   }
 
+  .player-count-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .rule-grid,
   .created-player-grid {
     grid-template-columns: 1fr;
@@ -715,11 +759,12 @@ select:disabled {
 
 .seat-grid {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--seat-column-count, 8), minmax(0, 1fr));
+  gap: 1px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 0.6rem;
-  background: var(--surface);
+  background: var(--border);
 }
 
 .seat-grid article {
@@ -727,11 +772,7 @@ select:disabled {
   min-width: 0;
   min-height: 8.5rem;
   padding: 0.9rem;
-  border-right: 1px solid var(--border);
-}
-
-.seat-grid article:last-child {
-  border-right: 0;
+  background: var(--surface);
 }
 
 .seat-grid article.departed {
@@ -1307,14 +1348,6 @@ select:disabled {
   .seat-grid {
     grid-template-columns: repeat(4, 1fr);
   }
-
-  .seat-grid article:nth-child(4) {
-    border-right: 0;
-  }
-
-  .seat-grid article:nth-child(-n + 4) {
-    border-bottom: 1px solid var(--border);
-  }
 }
 
 @media (max-width: 760px) {
@@ -1334,14 +1367,6 @@ select:disabled {
 
   .seat-grid {
     grid-template-columns: repeat(2, 1fr);
-  }
-
-  .seat-grid article:nth-child(2n) {
-    border-right: 0;
-  }
-
-  .seat-grid article:nth-child(-n + 6) {
-    border-bottom: 1px solid var(--border);
   }
 
   .house-rules dl {

@@ -21,7 +21,9 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/models", (route) => route.fulfill({ json: models }));
 });
 
-test("shows the eight-seat arena setup with V1 defaults", async ({ page }) => {
+test("shows the variable-seat arena setup with eight-player defaults", async ({
+  page,
+}) => {
   await page.goto("/");
   await expect(
     page.getByRole("heading", { name: "The village is waiting." }),
@@ -33,6 +35,10 @@ test("shows the eight-seat arena setup with V1 defaults", async ({ page }) => {
   await expect(page.getByLabel("Exiled player final words")).toBeChecked();
   await expect(page.getByLabel("One Werewolf re-proposal")).not.toBeChecked();
   await expect(page.getByLabel("Allow vote abstention")).not.toBeChecked();
+  await expect(
+    page.getByRole("button", { name: "Remove player" }),
+  ).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Add player" })).toBeEnabled();
 
   const selectedModels = await page
     .getByLabel("OpenRouter model")
@@ -40,6 +46,41 @@ test("shows the eight-seat arena setup with V1 defaults", async ({ page }) => {
       selects.map((select) => (select as HTMLSelectElement).value),
     );
   expect(new Set(selectedModels)).toEqual(new Set(["vendor/model-a"]));
+});
+
+test("adds and removes players within the six-to-twelve limits", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByText("2 models available")).toBeVisible();
+  const removePlayer = page.getByRole("button", { name: "Remove player" });
+  const addPlayer = page.getByRole("button", { name: "Add player" });
+
+  await removePlayer.click();
+  await removePlayer.click();
+  await expect(page.getByLabel("Player name")).toHaveCount(6);
+  await expect(
+    page.getByText("6 players · Minimum 6, maximum 12"),
+  ).toBeVisible();
+  await expect(
+    page.getByText("1 Werewolf · 1 Seer · 1 Doctor · 3 Villagers"),
+  ).toBeVisible();
+  await expect(removePlayer).toBeDisabled();
+
+  for (let count = 6; count < 12; count += 1) await addPlayer.click();
+  await expect(page.getByLabel("Player name")).toHaveCount(12);
+  await expect(page.getByLabel("Player name").last()).toHaveValue("Rowan");
+  await expect(
+    page.getByText("12 players · Minimum 6, maximum 12"),
+  ).toBeVisible();
+  await expect(
+    page.getByText("3 Werewolves · 1 Seer · 1 Doctor · 7 Villagers"),
+  ).toBeVisible();
+  await expect(addPlayer).toBeDisabled();
+
+  await page.getByRole("button", { name: /Begin at Night 0/ }).click();
+  await expect(page).toHaveURL(/\/games\//, { timeout: 15_000 });
+  await expect(page.locator(".seat-grid article")).toHaveCount(12);
 });
 
 test("blocks case-insensitive duplicate player names", async ({ page }) => {

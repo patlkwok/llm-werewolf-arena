@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { EventVisibility, type GameEvent } from "@/game-engine/events";
 import { GameStatus, type GameState } from "@/game-engine/types";
 import type { GameControl } from "@/persistence/repository";
@@ -221,7 +227,17 @@ export function SpectatorArena({
           </div>
           <p>{stageCounter(view.state)}</p>
         </div>
-        <div className="seat-grid">
+        <div
+          className="seat-grid"
+          style={
+            {
+              "--seat-column-count":
+                view.state.players.length <= 8
+                  ? view.state.players.length
+                  : Math.ceil(view.state.players.length / 2),
+            } as CSSProperties
+          }
+        >
           {view.state.players.map((player) => (
             <article
               className={player.isAlive ? "alive" : "departed"}

@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { applyAction, getPendingAction } from "./engine";
+import { createGame } from "./setup";
 import {
   act,
   fallback,
   finishDiscussion,
   finishVotingWithFallbacks,
   playerWithRole,
+  standardSetups,
   testGame,
 } from "./test-helpers";
 import { Phase, Role } from "./types";
@@ -225,6 +227,66 @@ describe("night actions", () => {
     expect(
       state.players.find((player) => player.id === target.id)?.isAlive,
     ).toBe(true);
+  });
+
+  it("lets a lone Werewolf resolve a proposal without a response turn", () => {
+    const created = createGame(standardSetups(6), { seed: 61 });
+    if (!created.ok) throw new Error(created.error.message);
+    let state = fallback(fallback(created.value));
+    const target = playerWithRole(state, Role.VILLAGER);
+
+    state = act(state, {
+      action: "propose_elimination",
+      targetPlayerId: target.id,
+    });
+
+    expect(state.phase).toBe(Phase.DAY_DISCUSSION);
+    expect(state.nightHistory[0]).toMatchObject({
+      selectedTargetId: target.id,
+      eliminatedPlayerId: target.id,
+      outcome: "ELIMINATED",
+      werewolfAttempts: [
+        {
+          responses: [],
+          succeeded: true,
+        },
+      ],
+    });
+  });
+
+  it("requires both other Werewolves to agree in a three-Werewolf game", () => {
+    const created = createGame(standardSetups(10), { seed: 103 });
+    if (!created.ok) throw new Error(created.error.message);
+    let state = fallback(fallback(created.value));
+    const target = playerWithRole(state, Role.VILLAGER);
+
+    state = act(state, {
+      action: "propose_elimination",
+      targetPlayerId: target.id,
+    });
+    const firstResponder = getPendingAction(state);
+    expect(firstResponder?.kind).toBe("WEREWOLF_RESPOND");
+    state = act(state, { action: "agree" });
+    const secondResponder = getPendingAction(state);
+    expect(secondResponder?.kind).toBe("WEREWOLF_RESPOND");
+    expect(secondResponder?.playerId).not.toBe(firstResponder?.playerId);
+    expect(
+      state.players.find((player) => player.id === target.id)?.isAlive,
+    ).toBe(true);
+
+    state = act(state, { action: "agree" });
+    expect(state.phase).toBe(Phase.DAY_DISCUSSION);
+    expect(state.nightHistory[0]).toMatchObject({
+      selectedTargetId: target.id,
+      eliminatedPlayerId: target.id,
+      outcome: "ELIMINATED",
+      werewolfAttempts: [
+        {
+          responses: [{ response: "AGREE" }, { response: "AGREE" }],
+          succeeded: true,
+        },
+      ],
+    });
   });
 
   it("allows exactly one re-proposal with the next Werewolf as proposer", () => {

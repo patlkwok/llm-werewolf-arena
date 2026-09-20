@@ -14,7 +14,7 @@ export default function Home() {
     <main className="shell">
       <header className="hero">
         <div>
-          <p className="eyebrow">Local arena · Eight autonomous players</p>
+          <p className="eyebrow">Local arena · Six to twelve players</p>
           <h1>The village is waiting.</h1>
         </div>
         <p className="lede">

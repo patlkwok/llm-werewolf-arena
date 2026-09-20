@@ -2,17 +2,36 @@ import { describe, expect, it } from "vitest";
 import { getPendingAction } from "./engine";
 import {
   createGame,
+  DEFAULT_PLAYER_COUNT,
   MAX_DISPLAY_NAME_LENGTH,
-  PLAYER_COUNT,
-  V1_ROLE_COUNTS,
+  MAX_PLAYER_COUNT,
+  MIN_PLAYER_COUNT,
+  ROLE_DISTRIBUTIONS,
 } from "./setup";
 import { standardSetups } from "./test-helpers";
 import { Phase, Role } from "./types";
 
 describe("game setup", () => {
-  it("requires exactly eight players", () => {
-    const result = createGame(standardSetups().slice(0, 7), { seed: 1 });
-    expect(result).toMatchObject({
+  it("accepts six through twelve players and rejects counts outside that range", () => {
+    for (
+      let playerCount = MIN_PLAYER_COUNT;
+      playerCount <= MAX_PLAYER_COUNT;
+      playerCount += 1
+    ) {
+      expect(createGame(standardSetups(playerCount), { seed: 1 }).ok).toBe(
+        true,
+      );
+    }
+
+    expect(
+      createGame(standardSetups(MIN_PLAYER_COUNT - 1), { seed: 1 }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_SETUP" },
+    });
+    expect(
+      createGame(standardSetups(MAX_PLAYER_COUNT + 1), { seed: 1 }),
+    ).toMatchObject({
       ok: false,
       error: { code: "INVALID_SETUP" },
     });
@@ -47,31 +66,30 @@ describe("game setup", () => {
     expect(createGame(emptyModel, { seed: 1 }).ok).toBe(false);
   });
 
-  it("assigns the fixed role distribution deterministically from a seed", () => {
-    expect(
-      Object.values(V1_ROLE_COUNTS).reduce((sum, count) => sum + count, 0),
-    ).toBe(PLAYER_COUNT);
-    const first = createGame(standardSetups(), { seed: 19 });
-    const second = createGame(standardSetups(), { seed: 19 });
-    expect(first.ok).toBe(true);
-    expect(second.ok).toBe(true);
-    if (!first.ok || !second.ok) return;
+  it("assigns every fixed role distribution deterministically from a seed", () => {
+    for (const [countText, expectedCounts] of Object.entries(
+      ROLE_DISTRIBUTIONS,
+    )) {
+      const playerCount = Number(countText);
+      expect(
+        Object.values(expectedCounts).reduce((sum, count) => sum + count, 0),
+      ).toBe(playerCount);
+      const first = createGame(standardSetups(playerCount), { seed: 19 });
+      const second = createGame(standardSetups(playerCount), { seed: 19 });
+      expect(first.ok).toBe(true);
+      expect(second.ok).toBe(true);
+      if (!first.ok || !second.ok) continue;
 
-    expect(first.value.players.map((player) => player.role)).toEqual(
-      second.value.players.map((player) => player.role),
-    );
-    expect(
-      first.value.players.filter((player) => player.role === Role.WEREWOLF),
-    ).toHaveLength(2);
-    expect(
-      first.value.players.filter((player) => player.role === Role.SEER),
-    ).toHaveLength(1);
-    expect(
-      first.value.players.filter((player) => player.role === Role.DOCTOR),
-    ).toHaveLength(1);
-    expect(
-      first.value.players.filter((player) => player.role === Role.VILLAGER),
-    ).toHaveLength(4);
+      expect(first.value.players.map((player) => player.role)).toEqual(
+        second.value.players.map((player) => player.role),
+      );
+      for (const role of Object.values(Role)) {
+        expect(
+          first.value.players.filter((player) => player.role === role),
+        ).toHaveLength(expectedCounts[role]);
+      }
+      expect(first.value.dayStartMarkerSeat).toBe(playerCount - 1);
+    }
   });
 
   it("allows duplicate models while keeping IDs, names, seats, roles, and models distinct", () => {
@@ -83,11 +101,11 @@ describe("game setup", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(new Set(result.value.players.map((player) => player.id)).size).toBe(
-      8,
+      DEFAULT_PLAYER_COUNT,
     );
     expect(
       new Set(result.value.players.map((player) => player.seat)).size,
-    ).toBe(8);
+    ).toBe(DEFAULT_PLAYER_COUNT);
     expect(
       new Set(result.value.players.map((player) => player.modelId)),
     ).toEqual(new Set(["fake/shared"]));

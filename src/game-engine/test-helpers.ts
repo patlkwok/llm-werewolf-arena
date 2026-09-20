@@ -1,5 +1,5 @@
 import { applyAction, applyFallback, getPendingAction } from "./engine";
-import { createGame } from "./setup";
+import { createGame, DEFAULT_PLAYER_COUNT } from "./setup";
 import {
   type CreateGameOptions,
   type GameAction,
@@ -9,8 +9,10 @@ import {
   Role,
 } from "./types";
 
-export function standardSetups(): PlayerSetup[] {
-  return Array.from({ length: 8 }, (_, index) => ({
+export function standardSetups(
+  playerCount = DEFAULT_PLAYER_COUNT,
+): PlayerSetup[] {
+  return Array.from({ length: playerCount }, (_, index) => ({
     displayName: `Player ${index + 1}`,
     modelId: index % 2 === 0 ? "fake/shared" : `fake/model-${index}`,
   }));
