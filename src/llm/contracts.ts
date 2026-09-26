@@ -1,54 +1,77 @@
 import { z } from "zod";
-import type { GameAction, PendingAction } from "@/game-engine/types";
+import type { GameAction, PendingAction, PlayerId } from "@/game-engine/types";
 
-const discussionSchema: z.ZodType<GameAction> = z.union([
+export type SeatAction =
+  | {
+      action: "protect" | "inspect" | "propose_elimination" | "vote";
+      targetSeat: number;
+    }
+  | {
+      action: "use_potions";
+      useSavePotion: boolean;
+      eliminateSeat: number | null;
+    }
+  | { action: "speak"; message: string }
+  | { action: "pass" }
+  | { action: "agree" }
+  | { action: "disagree" }
+  | { action: "abstain" }
+  | { action: "final_words"; message: string };
+
+const discussionSchema: z.ZodType<SeatAction> = z.union([
   z.object({ action: z.literal("speak"), message: z.string().min(1) }).strict(),
   z
     .object({ action: z.literal("pass"), message: z.string().optional() })
     .strict()
     .transform(() => ({ action: "pass" as const })),
 ]);
-const doctorSchema: z.ZodType<GameAction> = z
-  .object({ action: z.literal("protect"), targetPlayerId: z.string().min(1) })
+const seatSchema = z.number().int().positive();
+const doctorSchema: z.ZodType<SeatAction> = z
+  .object({ action: z.literal("protect"), targetSeat: seatSchema })
   .strict();
-const seerSchema: z.ZodType<GameAction> = z
-  .object({ action: z.literal("inspect"), targetPlayerId: z.string().min(1) })
+const seerSchema: z.ZodType<SeatAction> = z
+  .object({ action: z.literal("inspect"), targetSeat: seatSchema })
   .strict();
-const werewolfProposalSchema: z.ZodType<GameAction> = z
+const witchSchema: z.ZodType<SeatAction> = z
   .object({
-    action: z.literal("propose_elimination"),
-    targetPlayerId: z.string().min(1),
+    action: z.literal("use_potions"),
+    useSavePotion: z.boolean(),
+    eliminateSeat: seatSchema.nullable(),
   })
   .strict();
-const werewolfResponseSchema: z.ZodType<GameAction> = z.union([
+const werewolfProposalSchema: z.ZodType<SeatAction> = z
+  .object({
+    action: z.literal("propose_elimination"),
+    targetSeat: seatSchema,
+  })
+  .strict();
+const werewolfResponseSchema: z.ZodType<SeatAction> = z.union([
   z.object({ action: z.literal("agree") }).strict(),
   z.object({ action: z.literal("disagree") }).strict(),
 ]);
-const voteSchema: z.ZodType<GameAction> = z.union([
-  z
-    .object({ action: z.literal("vote"), targetPlayerId: z.string().min(1) })
-    .strict(),
+const voteSchema: z.ZodType<SeatAction> = z.union([
+  z.object({ action: z.literal("vote"), targetSeat: seatSchema }).strict(),
   z
     .object({
       action: z.literal("abstain"),
-      targetPlayerId: z.null().optional(),
+      targetSeat: z.null().optional(),
     })
     .strict()
     .transform(() => ({ action: "abstain" as const })),
 ]);
-const finalWordsSchema: z.ZodType<GameAction> = z
+const finalWordsSchema: z.ZodType<SeatAction> = z
   .object({ action: z.literal("final_words"), message: z.string().min(1) })
   .strict();
 
 interface ResponseContract {
   schemaName: string;
-  schema: z.ZodType<GameAction>;
+  schema: z.ZodType<SeatAction>;
   jsonSchema: Record<string, unknown>;
 }
 
 function contract(
   schemaName: string,
-  schema: z.ZodType<GameAction>,
+  schema: z.ZodType<SeatAction>,
   jsonSchema: Record<string, unknown>,
 ): ResponseContract {
   return { schemaName, schema, jsonSchema };
@@ -69,10 +92,30 @@ const actionProperty = (...values: string[]) => ({
   type: "string",
   enum: values,
 });
-const playerIdProperty = { type: "string", minLength: 1 };
+const seatProperty = { type: "integer", minimum: 1 };
 const messageProperty = { type: "string" };
 
-export function responseContractFor(action: PendingAction): ResponseContract {
+export function responseContractFor(
+  action: PendingAction,
+  requireExplanation = false,
+): ResponseContract {
+  const base = baseResponseContractFor(action);
+  if (!requireExplanation) return base;
+  return {
+    ...base,
+    schemaName: `${base.schemaName}_explained`,
+    jsonSchema: {
+      ...base.jsonSchema,
+      properties: {
+        ...(base.jsonSchema.properties as Record<string, unknown>),
+        explanation: { type: "string", minLength: 1 },
+      },
+      required: [...(base.jsonSchema.required as string[]), "explanation"],
+    },
+  };
+}
+
+function baseResponseContractFor(action: PendingAction): ResponseContract {
   switch (action.kind) {
     case "DOCTOR_PROTECT":
       return contract(
@@ -80,7 +123,7 @@ export function responseContractFor(action: PendingAction): ResponseContract {
         doctorSchema,
         strictObjectSchema({
           action: actionProperty("protect"),
-          targetPlayerId: playerIdProperty,
+          targetSeat: seatProperty,
         }),
       );
     case "SEER_INSPECT":
@@ -89,7 +132,17 @@ export function responseContractFor(action: PendingAction): ResponseContract {
         seerSchema,
         strictObjectSchema({
           action: actionProperty("inspect"),
-          targetPlayerId: playerIdProperty,
+          targetSeat: seatProperty,
+        }),
+      );
+    case "WITCH_ACT":
+      return contract(
+        "witch_potions",
+        witchSchema,
+        strictObjectSchema({
+          action: actionProperty("use_potions"),
+          useSavePotion: { type: "boolean" },
+          eliminateSeat: { type: ["integer", "null"], minimum: 1 },
         }),
       );
     case "WEREWOLF_PROPOSE":
@@ -98,7 +151,7 @@ export function responseContractFor(action: PendingAction): ResponseContract {
         werewolfProposalSchema,
         strictObjectSchema({
           action: actionProperty("propose_elimination"),
-          targetPlayerId: playerIdProperty,
+          targetSeat: seatProperty,
         }),
       );
     case "WEREWOLF_RESPOND":
@@ -122,7 +175,7 @@ export function responseContractFor(action: PendingAction): ResponseContract {
         voteSchema,
         strictObjectSchema({
           action: actionProperty("vote", "abstain"),
-          targetPlayerId: { type: ["string", "null"] },
+          targetSeat: { type: ["integer", "null"], minimum: 1 },
         }),
       );
     case "FINAL_WORDS":
@@ -138,7 +191,7 @@ export function responseContractFor(action: PendingAction): ResponseContract {
 }
 
 export type ParseResponseResult =
-  | { ok: true; action: GameAction }
+  | { ok: true; action: SeatAction; explanation: string | null }
   | {
       ok: false;
       category: "MALFORMED_JSON" | "SCHEMA_INVALID";
@@ -148,6 +201,7 @@ export type ParseResponseResult =
 export function parseStructuredResponse(
   pending: PendingAction,
   output: unknown,
+  requireExplanation = false,
 ): ParseResponseResult {
   let candidate = output;
   if (typeof candidate === "string") {
@@ -162,6 +216,26 @@ export function parseStructuredResponse(
     }
   }
 
+  let explanation: string | null = null;
+  if (requireExplanation) {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate) ||
+      typeof (candidate as Record<string, unknown>).explanation !== "string" ||
+      !(candidate as { explanation: string }).explanation.trim()
+    ) {
+      return {
+        ok: false,
+        category: "SCHEMA_INVALID",
+        message: "A non-empty private move explanation is required.",
+      };
+    }
+    explanation = (candidate as { explanation: string }).explanation.trim();
+    const actionOnly = { ...(candidate as Record<string, unknown>) };
+    delete actionOnly.explanation;
+    candidate = actionOnly;
+  }
   const parsed = responseContractFor(pending).schema.safeParse(candidate);
   if (!parsed.success) {
     return {
@@ -170,5 +244,32 @@ export function parseStructuredResponse(
       message: parsed.error.issues.map((issue) => issue.message).join(" "),
     };
   }
-  return { ok: true, action: parsed.data };
+  return { ok: true, action: parsed.data, explanation };
+}
+
+export function resolveSeatAction(
+  action: SeatAction,
+  playerIdForSeat: (seat: number) => PlayerId,
+): GameAction {
+  switch (action.action) {
+    case "protect":
+    case "inspect":
+    case "propose_elimination":
+    case "vote":
+      return {
+        action: action.action,
+        targetPlayerId: playerIdForSeat(action.targetSeat),
+      };
+    case "use_potions":
+      return {
+        action: action.action,
+        useSavePotion: action.useSavePotion,
+        eliminatePlayerId:
+          action.eliminateSeat === null
+            ? null
+            : playerIdForSeat(action.eliminateSeat),
+      };
+    default:
+      return action;
+  }
 }

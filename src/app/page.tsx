@@ -60,7 +60,7 @@ function stageForSummary(game: {
   dayNumber: number;
   nightNumber: number;
 }): string {
-  return game.phase.startsWith("NIGHT_")
+  return game.phase.startsWith("NIGHT")
     ? `Night ${game.nightNumber}`
     : `Day ${game.dayNumber}`;
 }

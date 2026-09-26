@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getPendingAction } from "@/game-engine/engine";
 import { fallback, playerWithRole, testGame } from "@/game-engine/test-helpers";
-import { GameStatus, Phase, Role } from "@/game-engine/types";
+import { GameStatus, Phase, Role, type GameState } from "@/game-engine/types";
 import {
   AdapterFailureCategory,
   OpenRouterAdapter,
@@ -14,6 +14,10 @@ import { GameOrchestrator } from "./orchestrator";
 
 function response(output: unknown, reasoning?: string) {
   return { type: "response" as const, output, reasoning };
+}
+
+function modelSeat(state: GameState, playerId: string): number {
+  return state.players.find((player) => player.id === playerId)!.seat + 1;
 }
 
 describe("network-free game orchestrator", () => {
@@ -46,10 +50,10 @@ describe("network-free game orchestrator", () => {
     if (legalTarget.kind !== "SEER_INSPECT")
       throw new Error("Expected Seer action.");
     const adapter = new ScriptedModelAdapter([
-      response({ action: "inspect", targetPlayerId: seer.id }),
+      response({ action: "inspect", targetSeat: seer.seat + 1 }),
       response({
         action: "inspect",
-        targetPlayerId: legalTarget.legalTargetIds[0],
+        targetSeat: modelSeat(state, legalTarget.legalTargetIds[0]!),
       }),
     ]);
     const result = await new GameOrchestrator(adapter).advanceOne(state);
@@ -59,6 +63,10 @@ describe("network-free game orchestrator", () => {
       "ILLEGAL_ACTION",
       "SUCCESS",
     ]);
+    expect(result.acceptedAction).toEqual({
+      action: "inspect",
+      targetPlayerId: legalTarget.legalTargetIds[0],
+    });
     expect(adapter.requests.map((request) => request.semanticAttempt)).toEqual([
       "INITIAL",
       "CORRECTION",
@@ -68,12 +76,35 @@ describe("network-free game orchestrator", () => {
     );
   });
 
+  it("treats an out-of-range seat as an illegal move and corrects it", async () => {
+    const state = testGame();
+    const pending = getPendingAction(state)!;
+    if (pending.kind !== "DOCTOR_PROTECT")
+      throw new Error("Expected Doctor action.");
+    const adapter = new ScriptedModelAdapter([
+      response({ action: "protect", targetSeat: 99 }),
+      response({
+        action: "protect",
+        targetSeat: modelSeat(state, pending.legalTargetIds[0]!),
+      }),
+    ]);
+    const result = await new GameOrchestrator(adapter).advanceOne(state);
+    expect(result.attempts.map((attempt) => attempt.outcome)).toEqual([
+      "ILLEGAL_ACTION",
+      "SUCCESS",
+    ]);
+    expect(result.acceptedAction).toEqual({
+      action: "protect",
+      targetPlayerId: pending.legalTargetIds[0],
+    });
+  });
+
   it("falls back after the corrected action is also illegal", async () => {
     const state = fallback(testGame());
     const seer = playerWithRole(state, Role.SEER);
     const adapter = new ScriptedModelAdapter([
-      response({ action: "inspect", targetPlayerId: seer.id }),
-      response({ action: "inspect", targetPlayerId: seer.id }),
+      response({ action: "inspect", targetSeat: seer.seat + 1 }),
+      response({ action: "inspect", targetSeat: seer.seat + 1 }),
     ]);
     const result = await new GameOrchestrator(adapter).advanceOne(state);
 
@@ -95,12 +126,12 @@ describe("network-free game orchestrator", () => {
     const adapter = new ScriptedModelAdapter([
       response({ action: "inspect" }),
       response("bad json"),
-      response({ action: "inspect", targetPlayerId: seer.id }),
+      response({ action: "inspect", targetSeat: seer.seat + 1 }),
       { type: "failure", category: AdapterFailureCategory.PROVIDER_ERROR },
       response("also bad"),
       response({
         action: "inspect",
-        targetPlayerId: pending.legalTargetIds[0],
+        targetSeat: modelSeat(state, pending.legalTargetIds[0]!),
       }),
     ]);
     const result = await new GameOrchestrator(adapter).advanceOne(state);
@@ -128,7 +159,7 @@ describe("network-free game orchestrator", () => {
       response({ action: "inspect" }),
       response({
         action: "inspect",
-        targetPlayerId: pending.legalTargetIds[0],
+        targetSeat: modelSeat(state, pending.legalTargetIds[0]!),
       }),
     ]);
     const result = await new GameOrchestrator(adapter).advanceOne(state);
@@ -151,14 +182,16 @@ describe("network-free game orchestrator", () => {
     const reasoningSecret = "SPECTATOR_ONLY_REASONING";
     const adapter = new ScriptedModelAdapter([
       response(
-        { action: "protect", targetPlayerId: pending.legalTargetIds[0] },
+        {
+          action: "protect",
+          targetSeat: modelSeat(state, pending.legalTargetIds[0]!),
+        },
         reasoningSecret,
       ),
       response({
         action: "inspect",
-        targetPlayerId: state.players.find(
-          (player) => player.role !== Role.SEER,
-        )!.id,
+        targetSeat:
+          state.players.find((player) => player.role !== Role.SEER)!.seat + 1,
       }),
     ]);
     const orchestrator = new GameOrchestrator(adapter);
@@ -168,6 +201,44 @@ describe("network-free game orchestrator", () => {
     await orchestrator.advanceOne(state);
     expect(JSON.stringify(adapter.requests[1]?.messages)).not.toContain(
       reasoningSecret,
+    );
+  });
+
+  it("requires and persists a private move explanation without sharing it with later players", async () => {
+    let state = testGame({ experience: { requireMoveExplanation: true } });
+    const pending = getPendingAction(state)!;
+    if (pending.kind !== "DOCTOR_PROTECT")
+      throw new Error("Expected Doctor action.");
+    const secret = "PRIVATE_DOCTOR_PLAN";
+    const adapter = new ScriptedModelAdapter([
+      response({
+        action: "protect",
+        targetSeat: modelSeat(state, pending.legalTargetIds[0]!),
+      }),
+      response({
+        action: "protect",
+        targetSeat: modelSeat(state, pending.legalTargetIds[0]!),
+        explanation: secret,
+      }),
+      response({
+        action: "inspect",
+        targetSeat:
+          state.players.find((player) => player.role !== Role.SEER)!.seat + 1,
+        explanation: "A private Seer plan.",
+      }),
+    ]);
+    const orchestrator = new GameOrchestrator(adapter);
+    const first = await orchestrator.advanceOne(state);
+    expect(first.attempts.map((attempt) => attempt.outcome)).toEqual([
+      "SCHEMA_INVALID",
+      "SUCCESS",
+    ]);
+    expect(first.attempts.at(-1)?.moveExplanation).toBe(secret);
+    state = first.state;
+    await orchestrator.advanceOne(state);
+    expect(JSON.stringify(adapter.requests[2]?.messages)).not.toContain(secret);
+    expect(adapter.requests[0]?.responseJsonSchema.required).toContain(
+      "explanation",
     );
   });
 
@@ -183,7 +254,7 @@ describe("network-free game orchestrator", () => {
     const adapter = new ScriptedModelAdapter([
       response({
         action: "protect",
-        targetPlayerId: pending.legalTargetIds[0],
+        targetSeat: modelSeat(state, pending.legalTargetIds[0]!),
       }),
     ]);
     await new GameOrchestrator(adapter).advanceOne(state);
@@ -191,6 +262,12 @@ describe("network-free game orchestrator", () => {
     expect(JSON.stringify(adapter.requests[0]?.messages)).not.toContain(
       "SECRET_ROUTING_MODEL_ID",
     );
+    expect(JSON.stringify(adapter.requests[0]?.messages)).not.toMatch(
+      /"player-\d+"/,
+    );
+    expect(adapter.requests[0]?.responseJsonSchema.properties).toMatchObject({
+      targetSeat: { type: "integer", minimum: 1 },
+    });
   });
 
   it("runs a complete deterministic game without network calls", async () => {
@@ -234,7 +311,7 @@ describe("network-free game orchestrator", () => {
       const adapter = new ScriptedModelAdapter([
         response({
           action: "protect",
-          targetPlayerId: pending.legalTargetIds[0],
+          targetSeat: modelSeat(state, pending.legalTargetIds[0]!),
         }),
       ]);
       const result = await new GameOrchestrator(adapter, repository).advanceOne(
@@ -250,7 +327,10 @@ describe("network-free game orchestrator", () => {
     const connection = openDatabase(":memory:");
     try {
       const repository = new GameRepository(connection);
-      const state = testGame({ gameId: "telemetry-persistence" });
+      const state = testGame({
+        gameId: "telemetry-persistence",
+        experience: { requireMoveExplanation: true },
+      });
       repository.saveGame(state, 1000);
       const pending = getPendingAction(state)!;
       if (pending.kind !== "DOCTOR_PROTECT")
@@ -260,7 +340,8 @@ describe("network-free game orchestrator", () => {
           type: "response",
           output: {
             action: "protect",
-            targetPlayerId: pending.legalTargetIds[0],
+            targetSeat: modelSeat(state, pending.legalTargetIds[0]!),
+            explanation: "Protecting the player I trust most.",
           },
           reasoning: "operator-only reasoning",
           metadata: {
@@ -296,15 +377,21 @@ describe("network-free game orchestrator", () => {
         latencyMs: 75,
         outcome: "SUCCESS",
         providerName: "Provider A",
-        reasoningText: "operator-only reasoning",
+        reasoningText: null,
+        moveExplanation: "Protecting the player I trust most.",
         promptTokens: 100,
         reasoningTokens: 5,
         cost: 0.001,
         fallbackApplied: false,
         correctionUsed: false,
       });
+      expect(calls[0]?.reasoningDetailsJson).toBeNull();
+      expect(adapter.requests[0]?.excludeReasoningFromResponse).toBe(true);
       expect(JSON.stringify(result.state)).not.toContain(
         "operator-only reasoning",
+      );
+      expect(JSON.stringify(result.state)).not.toContain(
+        "Protecting the player I trust most.",
       );
 
       repository.saveTurnExecution(state.id, result);
@@ -324,28 +411,34 @@ describe("network-free game orchestrator", () => {
       if (pending.kind !== "DOCTOR_PROTECT")
         throw new Error("Expected Doctor action.");
       const apiKey = "SUPER_SECRET_OPENROUTER_KEY";
+      let providerBody = "";
       const adapter = new OpenRouterAdapter({
         apiKey,
-        fetchImpl: async () =>
-          new Response(
+        fetchImpl: async (_input, init) => {
+          providerBody = String(init?.body);
+          return new Response(
             JSON.stringify({
               choices: [
                 {
                   message: {
                     content: JSON.stringify({
                       action: "protect",
-                      targetPlayerId: pending.legalTargetIds[0],
+                      targetSeat: modelSeat(state, pending.legalTargetIds[0]!),
                     }),
                   },
                 },
               ],
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
-          ),
+          );
+        },
       });
       const result = await new GameOrchestrator(adapter, repository).advanceOne(
         state,
       );
+
+      expect(providerBody).not.toMatch(/"player-\d+"/);
+      expect(providerBody).toContain('"targetSeat"');
 
       expect(
         JSON.stringify({

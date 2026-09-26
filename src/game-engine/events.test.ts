@@ -58,7 +58,7 @@ describe("typed game events", () => {
     )!;
     expect(publicResolution).toMatchObject({
       visibility: EventVisibility.PUBLIC,
-      payload: { eliminatedPlayerId: null },
+      payload: { eliminatedPlayerIds: [] },
     });
     expect(publicResolution.payload).not.toHaveProperty("outcome");
     expect(privateResolution).toMatchObject({

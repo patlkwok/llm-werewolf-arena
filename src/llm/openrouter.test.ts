@@ -52,7 +52,7 @@ describe("OpenRouter adapter", () => {
         choices: [
           {
             message: {
-              content: '{"action":"protect","targetPlayerId":"p1"}',
+              content: '{"action":"protect","targetSeat":1}',
               reasoning: "private chain",
               reasoning_details: [{ type: "summary", text: "private" }],
             },
@@ -122,6 +122,25 @@ describe("OpenRouter adapter", () => {
     expect(body).not.toHaveProperty("reasoning");
     expect(body).not.toHaveProperty("max_tokens");
     expect(body).not.toHaveProperty("max_completion_tokens");
+  });
+
+  it("excludes provider reasoning when move explanations are required", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        choices: [{ message: { content: "{}" } }],
+      }),
+    );
+    const request = {
+      ...modelRequest(),
+      excludeReasoningFromResponse: true,
+    };
+    await new OpenRouterAdapter({ apiKey: "key", fetchImpl }).requestAction(
+      request,
+    );
+    const body = JSON.parse(
+      String(fetchImpl.mock.calls[0]![1]?.body),
+    ) as Record<string, unknown>;
+    expect(body.reasoning).toEqual({ exclude: true });
   });
 
   it("classifies timeout and provider failures", async () => {

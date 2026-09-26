@@ -11,6 +11,7 @@ import {
   Role,
   type GameState,
   type PlayerSetup,
+  type RoleCounts,
 } from "./types";
 
 export const MIN_PLAYER_COUNT = 6;
@@ -18,16 +19,16 @@ export const MAX_PLAYER_COUNT = 12;
 export const DEFAULT_PLAYER_COUNT = 8;
 export const MAX_DISPLAY_NAME_LENGTH = 40;
 
-export type RoleCounts = Readonly<Record<Role, number>>;
+export type { RoleCounts } from "./types";
 
 export const ROLE_DISTRIBUTIONS = {
-  6: { WEREWOLF: 1, SEER: 1, DOCTOR: 1, VILLAGER: 3 },
-  7: { WEREWOLF: 2, SEER: 1, DOCTOR: 1, VILLAGER: 3 },
-  8: { WEREWOLF: 2, SEER: 1, DOCTOR: 1, VILLAGER: 4 },
-  9: { WEREWOLF: 2, SEER: 1, DOCTOR: 1, VILLAGER: 5 },
-  10: { WEREWOLF: 3, SEER: 1, DOCTOR: 1, VILLAGER: 5 },
-  11: { WEREWOLF: 3, SEER: 1, DOCTOR: 1, VILLAGER: 6 },
-  12: { WEREWOLF: 3, SEER: 1, DOCTOR: 1, VILLAGER: 7 },
+  6: { WEREWOLF: 1, SEER: 1, DOCTOR: 1, WITCH: 0, VILLAGER: 3 },
+  7: { WEREWOLF: 2, SEER: 1, DOCTOR: 1, WITCH: 0, VILLAGER: 3 },
+  8: { WEREWOLF: 2, SEER: 1, DOCTOR: 1, WITCH: 0, VILLAGER: 4 },
+  9: { WEREWOLF: 2, SEER: 1, DOCTOR: 1, WITCH: 0, VILLAGER: 5 },
+  10: { WEREWOLF: 3, SEER: 1, DOCTOR: 1, WITCH: 0, VILLAGER: 5 },
+  11: { WEREWOLF: 3, SEER: 1, DOCTOR: 1, WITCH: 0, VILLAGER: 6 },
+  12: { WEREWOLF: 3, SEER: 1, DOCTOR: 1, WITCH: 0, VILLAGER: 7 },
 } as const satisfies Record<number, RoleCounts>;
 
 export function roleCountsForPlayerCount(
@@ -36,6 +37,36 @@ export function roleCountsForPlayerCount(
   return Object.hasOwn(ROLE_DISTRIBUTIONS, playerCount)
     ? ROLE_DISTRIBUTIONS[playerCount as keyof typeof ROLE_DISTRIBUTIONS]
     : null;
+}
+
+export function validateRoleCounts(
+  playerCount: number,
+  counts: RoleCounts,
+): string | null {
+  if (
+    !Number.isInteger(playerCount) ||
+    playerCount < MIN_PLAYER_COUNT ||
+    playerCount > MAX_PLAYER_COUNT
+  )
+    return "Player count must be between 6 and 12.";
+  if (
+    Object.keys(counts).sort().join(",") !==
+    Object.values(Role).sort().join(",")
+  )
+    return "Role distribution contains an unknown or missing role.";
+  if (
+    Object.values(counts).some((count) => !Number.isInteger(count) || count < 0)
+  )
+    return "Role counts must be nonnegative whole numbers.";
+  if (counts.WEREWOLF < 1 || counts.WEREWOLF > Math.floor(playerCount / 3))
+    return "Werewolf count must be between 1 and one third of the players.";
+  if (counts.SEER !== 1 || counts.DOCTOR > 1 || counts.WITCH > 1)
+    return "Use one Seer and at most one Doctor and one Witch.";
+  if (
+    Object.values(counts).reduce((sum, count) => sum + count, 0) !== playerCount
+  )
+    return "Role counts must add up to the player count.";
+  return null;
 }
 
 const playerSetupSchema = z.object({
@@ -77,7 +108,8 @@ export function createGame(
     };
   }
 
-  const roleCounts = roleCountsForPlayerCount(parsed.data.length);
+  const roleCounts =
+    options.roleCounts ?? roleCountsForPlayerCount(parsed.data.length);
   if (!roleCounts) {
     return {
       ok: false,
@@ -87,6 +119,9 @@ export function createGame(
       },
     };
   }
+  const roleError = validateRoleCounts(parsed.data.length, roleCounts);
+  if (roleError)
+    return { ok: false, error: { code: "INVALID_SETUP", message: roleError } };
 
   const seed = normalizeSeed(options.seed ?? Date.now());
   const random = createSeededRandom(seed);
@@ -117,9 +152,18 @@ export function createGame(
     id: options.gameId ?? `game-${seed.toString(16)}`,
     seed,
     status: GameStatus.ACTIVE,
-    phase: Phase.NIGHT_DOCTOR,
+    phase: roleCounts.DOCTOR === 1 ? Phase.NIGHT_DOCTOR : Phase.NIGHT_SEER,
     winner: null,
     rules,
+    options: {
+      requireMoveExplanation:
+        options.experience?.requireMoveExplanation ?? false,
+      hideSpoilersUntilEnd: options.experience?.hideSpoilersUntilEnd ?? false,
+    },
+    witchPotions: {
+      saveAvailable: roleCounts.WITCH === 1,
+      eliminationAvailable: roleCounts.WITCH === 1,
+    },
     players,
     nightNumber: 0,
     dayNumber: 0,

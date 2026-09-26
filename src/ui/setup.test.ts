@@ -3,6 +3,7 @@ import {
   DEFAULT_PLAYER_COUNT,
   MAX_PLAYER_COUNT,
   MIN_PLAYER_COUNT,
+  roleCountsForPlayerCount,
 } from "@/game-engine/setup";
 import {
   DEFAULT_PLAYER_NAMES,
@@ -12,6 +13,11 @@ import {
 
 function submission(playerCount = DEFAULT_PLAYER_COUNT): {
   players: { displayName: string; modelId: string }[];
+  roleCounts: NonNullable<ReturnType<typeof roleCountsForPlayerCount>>;
+  experience: {
+    requireMoveExplanation: boolean;
+    hideSpoilersUntilEnd: boolean;
+  };
   rules: {
     roleRevealOnDeparture: boolean;
     finalWordsForExiledPlayer: boolean;
@@ -24,6 +30,8 @@ function submission(playerCount = DEFAULT_PLAYER_COUNT): {
       displayName,
       modelId: "same/model",
     })),
+    roleCounts: roleCountsForPlayerCount(playerCount)!,
+    experience: { requireMoveExplanation: false, hideSpoilersUntilEnd: false },
     rules: {
       roleRevealOnDeparture: false,
       finalWordsForExiledPlayer: true,
@@ -72,6 +80,27 @@ describe("setup submission", () => {
     const blankModel = submission();
     blankModel.players[3]!.modelId = " ";
     expect(setupSubmissionSchema.safeParse(blankModel).success).toBe(false);
+  });
+
+  it("rejects role distributions that exceed the Werewolf cap or omit the Seer", () => {
+    const tooManyWolves = submission(6);
+    tooManyWolves.roleCounts = {
+      WEREWOLF: 3,
+      SEER: 1,
+      DOCTOR: 1,
+      WITCH: 0,
+      VILLAGER: 1,
+    };
+    expect(setupSubmissionSchema.safeParse(tooManyWolves).success).toBe(false);
+    const noSeer = submission(8);
+    noSeer.roleCounts = {
+      WEREWOLF: 2,
+      SEER: 0,
+      DOCTOR: 1,
+      WITCH: 1,
+      VILLAGER: 4,
+    };
+    expect(setupSubmissionSchema.safeParse(noSeer).success).toBe(false);
   });
 
   it("describes the fixed role preset for each supported player count", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getPendingAction } from "./engine";
+import { applyAction, getPendingAction } from "./engine";
 import {
   createGame,
   DEFAULT_PLAYER_COUNT,
@@ -72,7 +72,10 @@ describe("game setup", () => {
     )) {
       const playerCount = Number(countText);
       expect(
-        Object.values(expectedCounts).reduce((sum, count) => sum + count, 0),
+        Object.values(expectedCounts).reduce<number>(
+          (sum, count) => sum + count,
+          0,
+        ),
       ).toBe(playerCount);
       const first = createGame(standardSetups(playerCount), { seed: 19 });
       const second = createGame(standardSetups(playerCount), { seed: 19 });
@@ -109,6 +112,77 @@ describe("game setup", () => {
     expect(
       new Set(result.value.players.map((player) => player.modelId)),
     ).toEqual(new Set(["fake/shared"]));
+  });
+
+  it("accepts custom distributions through four Werewolves and skips an absent Doctor", () => {
+    const counts = { WEREWOLF: 4, SEER: 1, DOCTOR: 0, WITCH: 1, VILLAGER: 6 };
+    const result = createGame(standardSetups(12), {
+      seed: 1,
+      roleCounts: counts,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.phase).toBe(Phase.NIGHT_SEER);
+    expect(
+      result.value.players.filter((player) => player.role === Role.WEREWOLF),
+    ).toHaveLength(4);
+    expect(
+      result.value.players.filter((player) => player.role === Role.WITCH),
+    ).toHaveLength(1);
+    expect(getPendingAction(result.value)?.kind).toBe("SEER_INSPECT");
+  });
+
+  it("requires all three responders to agree in a four-Werewolf pack", () => {
+    const created = createGame(standardSetups(12), {
+      seed: 19,
+      roleCounts: { WEREWOLF: 4, SEER: 1, DOCTOR: 0, WITCH: 0, VILLAGER: 7 },
+    });
+    if (!created.ok) throw new Error(created.error.message);
+    let state = created.value;
+    const seerAction = getPendingAction(state)!;
+    if (seerAction.kind !== "SEER_INSPECT")
+      throw new Error("Expected Seer action.");
+    const inspected = applyAction(state, seerAction.playerId, {
+      action: "inspect",
+      targetPlayerId: seerAction.legalTargetIds[0]!,
+    });
+    if (!inspected.ok) throw new Error(inspected.error.message);
+    state = inspected.value;
+    const proposal = getPendingAction(state)!;
+    if (proposal.kind !== "WEREWOLF_PROPOSE")
+      throw new Error("Expected proposal.");
+    const proposed = applyAction(state, proposal.playerId, {
+      action: "propose_elimination",
+      targetPlayerId: proposal.legalTargetIds[0]!,
+    });
+    if (!proposed.ok) throw new Error(proposed.error.message);
+    state = proposed.value;
+    for (let index = 0; index < 3; index += 1) {
+      const response = getPendingAction(state)!;
+      expect(response.kind).toBe("WEREWOLF_RESPOND");
+      const applied = applyAction(state, response.playerId, {
+        action: "agree",
+      });
+      if (!applied.ok) throw new Error(applied.error.message);
+      state = applied.value;
+      if (index < 2) expect(state.phase).toBe(Phase.NIGHT_WEREWOLF_RESPONSES);
+    }
+    expect(state.currentNight).toBeNull();
+    expect(state.nightHistory[0]?.werewolfAttempts[0]?.responses).toHaveLength(
+      3,
+    );
+  });
+
+  it("rejects invalid custom role counts in the engine", () => {
+    const setups = standardSetups(6);
+    for (const roleCounts of [
+      { WEREWOLF: 3, SEER: 1, DOCTOR: 0, WITCH: 0, VILLAGER: 2 },
+      { WEREWOLF: 1, SEER: 0, DOCTOR: 1, WITCH: 0, VILLAGER: 4 },
+      { WEREWOLF: 1, SEER: 1, DOCTOR: 2, WITCH: 0, VILLAGER: 2 },
+      { WEREWOLF: 1, SEER: 1, DOCTOR: 0, WITCH: 2, VILLAGER: 2 },
+    ]) {
+      expect(createGame(setups, { roleCounts }).ok).toBe(false);
+    }
   });
 
   it("starts at Night 0 with only the living Doctor requested", () => {

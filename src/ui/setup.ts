@@ -4,6 +4,7 @@ import {
   MAX_PLAYER_COUNT,
   MIN_PLAYER_COUNT,
   roleCountsForPlayerCount,
+  validateRoleCounts,
 } from "@/game-engine/setup";
 import { Role } from "@/game-engine/types";
 
@@ -15,6 +16,21 @@ const playerSchema = z.object({
 export const setupSubmissionSchema = z
   .object({
     players: z.array(playerSchema).min(MIN_PLAYER_COUNT).max(MAX_PLAYER_COUNT),
+    roleCounts: z
+      .object({
+        WEREWOLF: z.number().int().nonnegative(),
+        SEER: z.number().int().nonnegative(),
+        DOCTOR: z.number().int().nonnegative(),
+        WITCH: z.number().int().nonnegative(),
+        VILLAGER: z.number().int().nonnegative(),
+      })
+      .strict(),
+    experience: z
+      .object({
+        requireMoveExplanation: z.boolean(),
+        hideSpoilersUntilEnd: z.boolean(),
+      })
+      .strict(),
     rules: z.object({
       roleRevealOnDeparture: z.boolean(),
       finalWordsForExiledPlayer: z.boolean(),
@@ -24,6 +40,16 @@ export const setupSubmissionSchema = z
   })
   .strict()
   .superRefine((submission, context) => {
+    const roleError = validateRoleCounts(
+      submission.players.length,
+      submission.roleCounts,
+    );
+    if (roleError)
+      context.addIssue({
+        code: "custom",
+        path: ["roleCounts"],
+        message: roleError,
+      });
     const names = new Set<string>();
     submission.players.forEach((player, index) => {
       const normalized = player.displayName.toLocaleLowerCase("en-US");
@@ -55,15 +81,21 @@ export const DEFAULT_PLAYER_NAMES = [
   "Rowan",
 ] as const;
 
-export function roleDistributionLabel(playerCount: number): string {
-  const counts = roleCountsForPlayerCount(playerCount);
+export function roleDistributionLabel(
+  playerCount: number,
+  selected?: ReturnType<typeof roleCountsForPlayerCount>,
+): string {
+  const counts = selected ?? roleCountsForPlayerCount(playerCount);
   if (!counts) return "No role preset available";
   return [
     roleLabel(counts[Role.WEREWOLF], "Werewolf", "Werewolves"),
     roleLabel(counts[Role.SEER], "Seer", "Seers"),
     roleLabel(counts[Role.DOCTOR], "Doctor", "Doctors"),
+    roleLabel(counts[Role.WITCH], "Witch", "Witches"),
     roleLabel(counts[Role.VILLAGER], "Villager", "Villagers"),
-  ].join(" · ");
+  ]
+    .filter((label) => !label.startsWith("0 "))
+    .join(" · ");
 }
 
 function roleLabel(count: number, singular: string, plural: string): string {

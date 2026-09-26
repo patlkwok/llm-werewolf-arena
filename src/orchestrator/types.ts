@@ -26,6 +26,7 @@ export interface TurnAttemptRecord {
   message: string | null;
   structuredAction: GameAction | null;
   reasoning: string | null;
+  moveExplanation?: string | null;
   startedAt: number;
   completedAt: number;
   latencyMs: number;

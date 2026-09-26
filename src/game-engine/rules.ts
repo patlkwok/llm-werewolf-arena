@@ -1,5 +1,6 @@
 import {
   type GamePlayer,
+  type GameState,
   type PlayerId,
   Role,
   Team,
@@ -14,6 +15,7 @@ const ROLE_CAPABILITIES: Readonly<
 > = {
   [Role.WEREWOLF]: { canDirectlyChangeUpcomingNightSurvival: true },
   [Role.DOCTOR]: { canDirectlyChangeUpcomingNightSurvival: true },
+  [Role.WITCH]: { canDirectlyChangeUpcomingNightSurvival: true },
   [Role.SEER]: { canDirectlyChangeUpcomingNightSurvival: false },
   [Role.VILLAGER]: { canDirectlyChangeUpcomingNightSurvival: false },
 };
@@ -89,6 +91,7 @@ export function resolveVotes(votes: readonly VoteRecord[]): VoteResult {
 export function evaluateWinner(
   players: readonly GamePlayer[],
   boundary: WinCheckBoundary,
+  witchPotions?: GameState["witchPotions"],
 ): Team | null {
   const living = livingPlayers(players);
   const werewolves = living.filter((player) => player.role === Role.WEREWOLF);
@@ -108,9 +111,12 @@ export function evaluateWinner(
     boundary === "DAY_END" &&
     living.length === 3 &&
     werewolves.length === 1 &&
-    !nonWerewolves.some(
-      (player) =>
-        ROLE_CAPABILITIES[player.role].canDirectlyChangeUpcomingNightSurvival,
+    !nonWerewolves.some((player) =>
+      player.role === Role.WITCH
+        ? Boolean(
+            witchPotions?.saveAvailable || witchPotions?.eliminationAvailable,
+          )
+        : ROLE_CAPABILITIES[player.role].canDirectlyChangeUpcomingNightSurvival,
     )
   ) {
     return Team.WEREWOLVES;

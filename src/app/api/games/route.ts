@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createGame } from "@/game-engine/setup";
 import { gameRepository } from "@/server/database";
+import { seedForCreateRequest } from "@/server/role-seed";
 import {
   arenaModelCredentialsConfigured,
   createArenaModelCatalog,
@@ -51,6 +52,21 @@ export async function POST(request: Request) {
           modelId: player.modelId,
         })),
       ) === JSON.stringify(submission.data.players) &&
+      JSON.stringify(
+        existing.options ?? {
+          requireMoveExplanation: false,
+          hideSpoilersUntilEnd: false,
+        },
+      ) === JSON.stringify(submission.data.experience) &&
+      JSON.stringify(
+        existing.players.reduce(
+          (counts, player) => ({
+            ...counts,
+            [player.role]: counts[player.role] + 1,
+          }),
+          { WEREWOLF: 0, SEER: 0, DOCTOR: 0, WITCH: 0, VILLAGER: 0 },
+        ),
+      ) === JSON.stringify(submission.data.roleCounts) &&
       Object.entries(submission.data.rules).every(
         ([key, value]) =>
           existing.rules[key as keyof typeof existing.rules] === value,
@@ -95,8 +111,10 @@ export async function POST(request: Request) {
 
   const created = createGame(submission.data.players, {
     gameId: envelope.data.requestId,
-    seed: seedFromRequestId(envelope.data.requestId),
+    seed: seedForCreateRequest(envelope.data.requestId),
     rules: submission.data.rules,
+    roleCounts: submission.data.roleCounts,
+    experience: submission.data.experience,
   });
   if (!created.ok) {
     return NextResponse.json({ error: created.error.message }, { status: 400 });
@@ -139,13 +157,4 @@ export async function DELETE(request: Request) {
 function crossOrigin(request: Request): boolean {
   const origin = request.headers.get("Origin");
   return origin !== null && origin !== new URL(request.url).origin;
-}
-
-function seedFromRequestId(requestId: string): number {
-  let hash = 2_166_136_261;
-  for (const character of requestId) {
-    hash ^= character.charCodeAt(0);
-    hash = Math.imul(hash, 16_777_619);
-  }
-  return hash >>> 0;
 }

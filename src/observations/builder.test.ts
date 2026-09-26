@@ -3,6 +3,7 @@ import { getPendingAction } from "@/game-engine/engine";
 import { createGame } from "@/game-engine/setup";
 import {
   act,
+  fallback,
   finishDiscussion,
   playerWithRole,
   reachDayWithNoDeparture,
@@ -10,6 +11,8 @@ import {
   testGame,
 } from "@/game-engine/test-helpers";
 import { Role } from "@/game-engine/types";
+import { responseContractFor } from "@/llm/contracts";
+import { buildModelMessages } from "@/llm/prompt";
 import { buildPlayerObservation } from "./builder";
 import {
   OBSERVATION_DELIMITERS,
@@ -45,6 +48,26 @@ function privateNightState() {
 }
 
 describe("player observation builder", () => {
+  it("shows one-based seats and names without internal player IDs in model prompts", () => {
+    const { state, seer } = privateNightState();
+    const observation = buildPlayerObservation(state, seer.id);
+    observation.authoritative.publicHistory.push({
+      sequence: 999,
+      type: "VOTE_RESOLVED",
+      payload: { result: { tally: { [state.players[0]!.id]: 2 } } },
+    });
+    const prompt = serializeObservationForPrompt(observation);
+    expect(prompt).toContain(`"ownSeat": ${seer.seat + 1}`);
+    expect(prompt).toContain('"seat": 1');
+    expect(prompt).toContain('"displayName": "Player 1"');
+    expect(prompt).toMatch(/"tally":\s*\{\s*"1": 2/);
+    for (const player of state.players) {
+      expect(prompt).not.toContain(`"${player.id}"`);
+    }
+    expect(prompt).toContain('"targetSeat"');
+    expect(prompt).toContain('"seerSeat"');
+  });
+
   it("shares the starting role counts with every role without revealing hidden assignments", () => {
     const state = testGame({ gameId: "public-role-counts" });
     for (const player of state.players) {
@@ -54,6 +77,7 @@ describe("player observation builder", () => {
         WEREWOLF: 2,
         SEER: 1,
         DOCTOR: 1,
+        WITCH: 0,
         VILLAGER: 4,
       });
       expect(observation.authoritative.ownRole).toBe(player.role);
@@ -101,6 +125,7 @@ describe("player observation builder", () => {
       WEREWOLF: 3,
       SEER: 1,
       DOCTOR: 1,
+      WITCH: 0,
       VILLAGER: 7,
     });
   });
@@ -126,7 +151,7 @@ describe("player observation builder", () => {
     expect(observation.authoritative.publicHistory).toContainEqual(
       expect.objectContaining({
         type: "NIGHT_RESOLVED",
-        payload: { nightNumber: 0, eliminatedPlayerId: null },
+        payload: { nightNumber: 0, eliminatedPlayerIds: [] },
       }),
     );
     expect(observation.authoritative.publicHistory).not.toContainEqual(
@@ -211,6 +236,89 @@ describe("player observation builder", () => {
     ).toBeNull();
   });
 
+  it("shows the Werewolf target and potion state only to the Witch", () => {
+    const created = createGame(standardSetups(6), {
+      seed: 14,
+      roleCounts: { WEREWOLF: 1, SEER: 1, DOCTOR: 1, WITCH: 1, VILLAGER: 2 },
+    });
+    if (!created.ok) throw new Error(created.error.message);
+    let state = fallback(fallback(created.value));
+    const target = playerWithRole(state, Role.VILLAGER);
+    state = act(state, {
+      action: "propose_elimination",
+      targetPlayerId: target.id,
+    });
+    const witch = playerWithRole(state, Role.WITCH);
+    const witchView = buildPlayerObservation(state, witch.id);
+    const villagerView = buildPlayerObservation(state, target.id);
+    expect(witchView.authoritative.currentAction).toMatchObject({
+      kind: "WITCH_ACT",
+      werewolfTargetId: target.id,
+      canSave: true,
+    });
+    expect(witchView.authoritative.rolePrivate).toMatchObject({
+      kind: Role.WITCH,
+      savePotionAvailable: true,
+      eliminationPotionAvailable: true,
+    });
+    const pending = getPendingAction(state)!;
+    const prompt = buildModelMessages(
+      witchView,
+      pending,
+      responseContractFor(pending).jsonSchema,
+      "INITIAL",
+      null,
+    )[1]!.content;
+    expect(prompt).toContain('"savePotionAvailable": true');
+    expect(prompt).toContain('"eliminationPotionAvailable": true');
+    expect(prompt).toContain(`"werewolfTargetSeat": ${target.seat + 1}`);
+    expect(prompt).not.toContain(`"${target.id}"`);
+    expect(prompt).toContain("a potion can be saved for a later night");
+    expect(prompt).toContain("both in the same night, or neither");
+    expect(JSON.stringify(villagerView)).not.toContain("werewolfTargetId");
+    expect(JSON.stringify(villagerView)).not.toContain("WITCH_ACT");
+    expect(villagerView.authoritative.currentAction).toBeNull();
+    expect(villagerView.authoritative.privateHistory).toEqual([]);
+    state = fallback(state);
+    const laterWitchView = buildPlayerObservation(state, witch.id);
+    const witchAction = laterWitchView.authoritative.privateHistory.find(
+      (event) => event.type === "WITCH_ACTED",
+    );
+    expect(witchAction?.payload).toMatchObject({
+      werewolfTargetId: target.id,
+      usedSavePotion: false,
+    });
+    expect(JSON.stringify(witchAction)).not.toContain("FALLBACK");
+    expect(JSON.stringify(witchAction)).not.toContain("source");
+  });
+
+  it("shows departure roles in player observations only when the reveal rule is on", () => {
+    for (const reveal of [false, true]) {
+      let state = testGame({ rules: { roleRevealOnDeparture: reveal } });
+      const target = playerWithRole(state, Role.VILLAGER);
+      state = fallback(fallback(state));
+      state = act(state, {
+        action: "propose_elimination",
+        targetPlayerId: target.id,
+      });
+      state = act(state, { action: "agree" });
+      const viewer = playerWithRole(state, Role.VILLAGER, 1);
+      const observation = buildPlayerObservation(
+        state,
+        viewer.id,
+      ).authoritative;
+      expect(
+        observation.players.find((player) => player.playerId === target.id)
+          ?.revealedRole,
+      ).toBe(reveal ? Role.VILLAGER : undefined);
+      expect(
+        observation.publicHistory.some(
+          (event) => event.type === "ROLE_REVEALED",
+        ),
+      ).toBe(reveal);
+    }
+  });
+
   it("keeps public sequential votes in later players' observations", () => {
     let state = finishDiscussion(reachDayWithNoDeparture(testGame()));
     const firstVote = getPendingAction(state)!;
@@ -225,6 +333,25 @@ describe("player observation builder", () => {
       type: "PLAYER_VOTED",
       payload: { playerId: firstVote.playerId },
     });
+  });
+
+  it("does not disclose fallback abstention telemetry to the next voter", () => {
+    let state = finishDiscussion(
+      reachDayWithNoDeparture(
+        testGame({
+          rules: { strategicVoteAbstention: true },
+          experience: { hideSpoilersUntilEnd: true },
+        }),
+      ),
+    );
+    state = fallback(state);
+    const nextVoter = getPendingAction(state)!;
+    const observation = buildPlayerObservation(state, nextVoter.playerId);
+    expect(observation.authoritative.publicHistory.at(-1)).toMatchObject({
+      type: "PLAYER_VOTED",
+      payload: { kind: "ABSTAIN" },
+    });
+    expect(JSON.stringify(observation)).not.toContain("FALLBACK_ABSTAIN");
   });
 
   it("isolates player names and speech in a clearly delimited untrusted section", () => {

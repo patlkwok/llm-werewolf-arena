@@ -9,15 +9,11 @@ import {
   useState,
 } from "react";
 import { EventVisibility, type GameEvent } from "@/game-engine/events";
-import { GameStatus, type GameState } from "@/game-engine/types";
-import type { GameControl } from "@/persistence/repository";
+import { GameStatus, Role } from "@/game-engine/types";
 import type { ModelCallRow } from "@/persistence/schema";
+import type { SpectatorGameState, SpectatorView } from "./spectator-view";
 
-export interface SpectatorView {
-  state: GameState;
-  control: GameControl;
-  modelCalls: ModelCallRow[];
-}
+export type { SpectatorView } from "./spectator-view";
 
 export function SpectatorArena({
   initialView,
@@ -148,6 +144,10 @@ export function SpectatorArena({
     0,
   );
   const failures = view.modelCalls.filter((call) => call.outcome !== "SUCCESS");
+  const spoilerLocked = Boolean(
+    view.state.options?.hideSpoilersUntilEnd &&
+    view.state.status === GameStatus.ACTIVE,
+  );
 
   return (
     <main className="arena-shell">
@@ -248,8 +248,8 @@ export function SpectatorArena({
                 <i aria-hidden="true" />
               </div>
               <strong>{player.displayName}</strong>
-              <small>{player.role}</small>
-              <code>{player.modelId}</code>
+              {player.role && <small>{player.role}</small>}
+              {player.modelId && <code>{player.modelId}</code>}
             </article>
           ))}
         </div>
@@ -294,98 +294,119 @@ export function SpectatorArena({
                 <div>
                   <strong>{eventTitle(event.type)}</strong>
                   <p>{eventDescription(event, view.state)}</p>
-                  {calls.length > 0 && <ActionAttempts calls={calls} />}
+                  {calls.length > 0 && (
+                    <ActionAttempts
+                      calls={calls}
+                      requireMoveExplanation={
+                        view.state.options?.requireMoveExplanation ?? false
+                      }
+                    />
+                  )}
                 </div>
               </article>
             ))}
           </div>
         </section>
 
-        <aside className="operator-column">
-          <section className="operator-panel">
-            <div className="panel-heading compact">
-              <div>
-                <p className="section-number">Spectator only</p>
-                <h2>Hidden actions</h2>
+        {!spoilerLocked && (
+          <aside className="operator-column">
+            <section className="operator-panel">
+              <div className="panel-heading compact">
+                <div>
+                  <p className="section-number">Spectator only</p>
+                  <h2>Hidden actions</h2>
+                </div>
+                <span>{privateEvents.length}</span>
               </div>
-              <span>{privateEvents.length}</span>
-            </div>
-            <div className="private-log">
-              {privateEventsWithCalls
-                .slice(-10)
-                .reverse()
-                .map(({ event, calls }) => (
+              <div className="private-log">
+                {newestFirst(privateEventsWithCalls).map(({ event, calls }) => (
                   <article key={event.sequence}>
                     <strong>{eventTitle(event.type)}</strong>
                     <p>{eventDescription(event, view.state)}</p>
                     <small>{event.visibility.replaceAll("_", " ")}</small>
-                    {calls.length > 0 && <ActionAttempts calls={calls} />}
+                    {calls.length > 0 && (
+                      <ActionAttempts
+                        calls={calls}
+                        requireMoveExplanation={
+                          view.state.options?.requireMoveExplanation ?? false
+                        }
+                      />
+                    )}
                   </article>
                 ))}
-            </div>
-          </section>
-
-          <section className="operator-panel">
-            <div className="panel-heading compact">
-              <div>
-                <p className="section-number">Operator</p>
-                <h2>Diagnostics</h2>
               </div>
-            </div>
-            <div className="metric-grid">
-              <Metric label="Calls" value={String(view.modelCalls.length)} />
-              <Metric
-                label="Retries / failures"
-                value={String(failures.length)}
-              />
-              <Metric label="Tokens" value={totalTokens.toLocaleString()} />
-              <Metric label="Cost" value={`$${totalCost.toFixed(5)}`} />
-            </div>
-            <div className="reasoning-log">
-              {view.modelCalls
-                .slice(-8)
-                .reverse()
-                .map((call) => (
-                  <details key={call.id}>
-                    <summary>
-                      <span>{playerName(view.state, call.playerId)}</span>
+            </section>
+
+            <section className="operator-panel">
+              <div className="panel-heading compact">
+                <div>
+                  <p className="section-number">Operator</p>
+                  <h2>Diagnostics</h2>
+                </div>
+              </div>
+              <div className="metric-grid">
+                <Metric label="Calls" value={String(view.modelCalls.length)} />
+                <Metric
+                  label="Retries / failures"
+                  value={String(failures.length)}
+                />
+                <Metric label="Tokens" value={totalTokens.toLocaleString()} />
+                <Metric label="Cost" value={`$${totalCost.toFixed(5)}`} />
+              </div>
+              <div className="reasoning-log">
+                {view.modelCalls
+                  .slice(-8)
+                  .reverse()
+                  .map((call) => (
+                    <details key={call.id}>
+                      <summary>
+                        <span>{playerName(view.state, call.playerId)}</span>
+                        <small>
+                          {call.latencyMs}ms · {call.outcome}
+                        </small>
+                      </summary>
+                      {call.errorMessage && (
+                        <p className="call-error">{call.errorMessage}</p>
+                      )}
+                      <p>
+                        {view.state.options?.requireMoveExplanation && (
+                          <strong>Move explanation: </strong>
+                        )}
+                        {visibleReasoning(
+                          call,
+                          view.state.options?.requireMoveExplanation,
+                        )}
+                      </p>
+                      <code>
+                        {call.providerName ?? "Provider unavailable"} ·{" "}
+                        {call.modelId}
+                      </code>
+                    </details>
+                  ))}
+              </div>
+              <div className="player-telemetry">
+                <p>Per-player totals</p>
+                {view.state.players.map((player) => {
+                  const calls = view.modelCalls.filter(
+                    (call) => call.playerId === player.id,
+                  );
+                  const cost = calls.reduce(
+                    (sum, call) => sum + (call.cost ?? 0),
+                    0,
+                  );
+                  return (
+                    <div key={player.id}>
+                      <span>{player.displayName}</span>
                       <small>
-                        {call.latencyMs}ms · {call.outcome}
+                        {calls.length} calls · ${cost.toFixed(5)}
                       </small>
-                    </summary>
-                    {call.errorMessage && (
-                      <p className="call-error">{call.errorMessage}</p>
-                    )}
-                    <p>{visibleReasoning(call)}</p>
-                    <code>
-                      {call.providerName ?? "Provider unavailable"} ·{" "}
-                      {call.modelId}
-                    </code>
-                  </details>
-                ))}
-            </div>
-            <div className="player-telemetry">
-              <p>Per-player totals</p>
-              {view.state.players.map((player) => {
-                const calls = view.modelCalls.filter(
-                  (call) => call.playerId === player.id,
-                );
-                const cost = calls.reduce(
-                  (sum, call) => sum + (call.cost ?? 0),
-                  0,
-                );
-                return (
-                  <div key={player.id}>
-                    <span>{player.displayName}</span>
-                    <small>
-                      {calls.length} calls · ${cost.toFixed(5)}
-                    </small>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        </aside>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          </aside>
+        )}
       </div>
     </main>
   );
@@ -400,10 +421,20 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ActionAttempts({ calls }: { calls: ModelCallRow[] }) {
+function ActionAttempts({
+  calls,
+  requireMoveExplanation,
+}: {
+  calls: ModelCallRow[];
+  requireMoveExplanation: boolean;
+}) {
   return (
     <details className="action-reasoning">
-      <summary>Reasoning & request details</summary>
+      <summary>
+        {requireMoveExplanation
+          ? "Move explanations & request details"
+          : "Reasoning & request details"}
+      </summary>
       {calls.map((call) => (
         <div key={call.id}>
           <b>
@@ -412,7 +443,10 @@ function ActionAttempts({ calls }: { calls: ModelCallRow[] }) {
           {call.errorMessage && (
             <p className="call-error">{call.errorMessage}</p>
           )}
-          <p>{visibleReasoning(call)}</p>
+          <p>
+            {requireMoveExplanation && <strong>Move explanation: </strong>}
+            {visibleReasoning(call, requireMoveExplanation)}
+          </p>
           <code>
             {call.providerName ?? "Provider unavailable"} · {call.modelId}
           </code>
@@ -422,7 +456,7 @@ function ActionAttempts({ calls }: { calls: ModelCallRow[] }) {
   );
 }
 
-function phaseLabel(state: GameState): string {
+function phaseLabel(state: SpectatorGameState): string {
   if (state.status === GameStatus.ABANDONED) {
     return "Game ended by operator";
   }
@@ -434,6 +468,8 @@ function phaseLabel(state: GameState): string {
     NIGHT_SEER: "Seer investigates",
     NIGHT_WEREWOLF_PROPOSAL: "Werewolves choose a target",
     NIGHT_WEREWOLF_RESPONSES: "Werewolves seek agreement",
+    NIGHT_WITCH: "Witch chooses potions",
+    NIGHT: "Night in progress",
     DAY_DISCUSSION: `Day ${state.dayNumber} discussion`,
     DAY_VOTING: `Day ${state.dayNumber} voting`,
     DAY_FINAL_WORDS: "Final words",
@@ -441,13 +477,13 @@ function phaseLabel(state: GameState): string {
   return labels[state.phase] ?? state.phase.replaceAll("_", " ");
 }
 
-export function stageCounter(state: GameState): string {
+export function stageCounter(state: SpectatorGameState): string {
   if (state.phase.startsWith("NIGHT_")) return `Night ${state.nightNumber}`;
   if (state.phase.startsWith("DAY_")) return `Day ${state.dayNumber}`;
   return "Game over";
 }
 
-function playerName(state: GameState, id: unknown): string {
+function playerName(state: SpectatorGameState, id: unknown): string {
   return (
     state.players.find((player) => player.id === id)?.displayName ??
     String(id ?? "Nobody")
@@ -461,7 +497,10 @@ function eventTitle(type: GameEvent["type"]): string {
     .replace(/^./, (letter) => letter.toUpperCase());
 }
 
-export function eventDescription(event: GameEvent, state: GameState): string {
+export function eventDescription(
+  event: GameEvent,
+  state: SpectatorGameState,
+): string {
   const payload = event.payload as Record<string, unknown>;
   if (event.type === "ROLES_ASSIGNED") {
     const assignments = payload.assignments as Array<{
@@ -477,12 +516,23 @@ export function eventDescription(event: GameEvent, state: GameState): string {
   }
   if (event.type === "DOCTOR_PROTECTION_RESOLVED") {
     return payload.targetPlayerId
-      ? `${playerName(state, payload.playerId)} protected ${playerName(state, payload.targetPlayerId)} (${String(payload.source).toLocaleLowerCase("en-US")}).`
+      ? `${playerName(state, payload.playerId)} protected ${playerName(state, payload.targetPlayerId)}.`
       : `${playerName(state, payload.playerId)} did not protect anyone; a fallback was applied.`;
   }
   if (event.type === "SEER_INSPECTED") {
     return `${playerName(state, payload.playerId)} inspected ${playerName(state, payload.targetPlayerId)} and learned ${payload.result === "WEREWOLF" ? "Werewolf" : "Not Werewolf"}.`;
   }
+  if (event.type === "WITCH_ACTED") {
+    const save = payload.usedSavePotion
+      ? `used save potion on ${playerName(state, payload.werewolfTargetId)}`
+      : "did not use save potion";
+    const elimination = payload.eliminationTargetId
+      ? `used elimination potion on ${playerName(state, payload.eliminationTargetId)}`
+      : "did not use elimination potion";
+    return `${playerName(state, payload.playerId)}: ${save}; ${elimination}.`;
+  }
+  if (event.type === "ROLE_REVEALED")
+    return `${playerName(state, payload.playerId)} was ${String(payload.role)}.`;
   if (event.type === "WEREWOLF_PROPOSED_TARGET") {
     return `${playerName(state, payload.proposerId)} proposed ${playerName(state, payload.targetPlayerId)} on attempt ${String(payload.attemptNumber)}.`;
   }
@@ -490,13 +540,66 @@ export function eventDescription(event: GameEvent, state: GameState): string {
     return `${playerName(state, payload.playerId)} ${payload.response === "AGREE" ? "agreed" : "disagreed"} on attempt ${String(payload.attemptNumber)}.`;
   }
   if (event.type === "NIGHT_RESOLUTION_DETAIL") {
-    const target = payload.selectedTargetId
-      ? playerName(state, payload.selectedTargetId)
-      : "none";
-    const protectedPlayer = payload.protectedTargetId
-      ? playerName(state, payload.protectedTargetId)
-      : "none";
-    return `Outcome: ${String(payload.outcome).replaceAll("_", " ").toLocaleLowerCase("en-US")} · selected target: ${target} · protected player: ${protectedPlayer}.`;
+    const target = payload.selectedTargetId;
+    const doctorTarget = payload.protectedTargetId;
+    // Older saved games have the Witch action only in its preceding private event.
+    const nightStarted = state.events
+      .filter(
+        (candidate) =>
+          candidate.type === "NIGHT_STARTED" &&
+          candidate.sequence < event.sequence,
+      )
+      .at(-1);
+    const witchAction = state.events
+      .filter(
+        (candidate) =>
+          candidate.type === "WITCH_ACTED" &&
+          candidate.sequence < event.sequence &&
+          candidate.sequence > (nightStarted?.sequence ?? 0),
+      )
+      .at(-1);
+    const witchSavedTarget =
+      payload.witchSavedTargetId ??
+      (witchAction?.type === "WITCH_ACTED" && witchAction.payload.usedSavePotion
+        ? witchAction.payload.werewolfTargetId
+        : null);
+    const witchEliminationTarget =
+      payload.witchEliminationTargetId ??
+      (witchAction?.type === "WITCH_ACTED"
+        ? witchAction.payload.eliminationTargetId
+        : null);
+    const witchEliminatedPlayer =
+      payload.witchEliminatedPlayerId ??
+      (witchEliminationTarget &&
+      !(witchEliminationTarget === target && payload.outcome === "ELIMINATED")
+        ? witchEliminationTarget
+        : null);
+    const outcome =
+      payload.outcome === "ELIMINATED"
+        ? `eliminated ${playerName(state, target)}`
+        : payload.outcome === "PROTECTED"
+          ? `blocked for ${playerName(state, target)}`
+          : payload.outcome === "NO_AGREEMENT"
+            ? "no target agreed"
+            : "no target proposed";
+    const elimination = witchEliminationTarget
+      ? witchEliminatedPlayer
+        ? `eliminated ${playerName(state, witchEliminatedPlayer)}`
+        : `used on ${playerName(state, witchEliminationTarget)} (already eliminated by Werewolves)`
+      : "unused";
+    const details = [`Werewolf attack: ${outcome}`];
+    if (state.players.some((player) => player.role === Role.DOCTOR)) {
+      details.push(
+        `Doctor protection: ${doctorTarget ? playerName(state, doctorTarget) : "none"}`,
+      );
+    }
+    if (state.players.some((player) => player.role === Role.WITCH)) {
+      details.push(
+        `Witch save: ${witchSavedTarget ? playerName(state, witchSavedTarget) : "none"}`,
+        `Witch elimination potion: ${elimination}`,
+      );
+    }
+    return `${details.join(" · ")}.`;
   }
   if (event.type === "FALLBACK_APPLIED") {
     return `${playerName(state, payload.playerId)} could not provide a usable ${String(payload.actionKind).replaceAll("_", " ").toLocaleLowerCase("en-US")} action, so the game fallback was applied.`;
@@ -546,8 +649,11 @@ export function eventDescription(event: GameEvent, state: GameState): string {
     return `${playerName(state, payload.playerId)} left the game.`;
   }
   if (event.type === "NIGHT_RESOLVED") {
-    return payload.eliminatedPlayerId
-      ? `${playerName(state, payload.eliminatedPlayerId)} was eliminated overnight.`
+    const departed =
+      (payload.eliminatedPlayerIds as string[] | undefined) ??
+      (payload.eliminatedPlayerId ? [payload.eliminatedPlayerId] : []);
+    return departed.length
+      ? `${departed.map((id) => playerName(state, id)).join(" and ")} left the game overnight.`
       : "Nobody was eliminated overnight.";
   }
   if (event.type === "GAME_ENDED") return `${String(payload.winner)} victory.`;
@@ -621,6 +727,7 @@ function eventCallMatch(event: GameEvent): {
     SEER_INSPECTED: "SEER_INSPECT",
     WEREWOLF_PROPOSED_TARGET: "WEREWOLF_PROPOSE",
     WEREWOLF_RESPONDED: "WEREWOLF_RESPOND",
+    WITCH_ACTED: "WITCH_ACT",
     PLAYER_SPOKE: "DISCUSS",
     PLAYER_PASSED: "DISCUSS",
     PLAYER_VOTED: "VOTE",
@@ -635,7 +742,15 @@ function eventCallMatch(event: GameEvent): {
   return { playerId: String(playerId), actionKind, requiresSuccess: true };
 }
 
-export function visibleReasoning(call: ModelCallRow): string {
+export function visibleReasoning(
+  call: ModelCallRow,
+  requireMoveExplanation = false,
+): string {
+  if (requireMoveExplanation) {
+    return (
+      call.moveExplanation?.trim() || "No valid move explanation was returned."
+    );
+  }
   if (call.reasoningText?.trim()) return call.reasoningText;
   if (call.reasoningDetailsJson) {
     try {

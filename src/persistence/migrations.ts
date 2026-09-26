@@ -105,6 +105,11 @@ const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 4,
+    name: "private_move_explanations",
+    sql: "ALTER TABLE model_calls ADD COLUMN move_explanation TEXT;",
+  },
 ];
 
 export function applyMigrations(sqlite: Database.Database): void {

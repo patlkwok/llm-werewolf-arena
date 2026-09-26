@@ -10,7 +10,11 @@ import {
   type PendingAction,
 } from "@/game-engine/types";
 import { buildPlayerObservation } from "@/observations/builder";
-import { parseStructuredResponse, responseContractFor } from "@/llm/contracts";
+import {
+  parseStructuredResponse,
+  resolveSeatAction,
+  responseContractFor,
+} from "@/llm/contracts";
 import { buildModelMessages } from "@/llm/prompt";
 import {
   AdapterFailureCategory,
@@ -31,6 +35,7 @@ const MAX_RESPONSE_ATTEMPTS = 3;
 interface SchemaValidResponse {
   action: GameAction;
   reasoning: string | null;
+  moveExplanation: string | null;
   callId: string;
   modelId: string;
   responseAttempt: 1 | 2 | 3;
@@ -189,7 +194,8 @@ export class GameOrchestrator {
     correctionError: string | null,
   ): Promise<SemanticResponseResult> {
     const attempts: TurnAttemptRecord[] = [];
-    const contract = responseContractFor(pending);
+    const requireExplanation = state.options?.requireMoveExplanation ?? false;
+    const contract = responseContractFor(pending, requireExplanation);
     const observation = buildPlayerObservation(state, pending.playerId);
 
     for (let attempt = 1; attempt <= MAX_RESPONSE_ATTEMPTS; attempt += 1) {
@@ -208,12 +214,14 @@ export class GameOrchestrator {
         correctionError,
         schemaName: contract.schemaName,
         responseJsonSchema: contract.jsonSchema,
+        excludeReasoningFromResponse: requireExplanation,
         messages: buildModelMessages(
           observation,
           pending,
           contract.jsonSchema,
           semanticAttempt,
           correctionError,
+          requireExplanation,
         ),
       };
 
@@ -259,7 +267,25 @@ export class GameOrchestrator {
         continue;
       }
 
-      const parsed = parseStructuredResponse(pending, adapterResult.output);
+      // The structured explanation is the sole operator rationale in this mode.
+      // Keep usage telemetry, but discard any provider reasoning an adapter returned.
+      const responseMetadata = adapterResult.metadata
+        ? {
+            ...adapterResult.metadata,
+            reasoningDetails: requireExplanation
+              ? null
+              : adapterResult.metadata.reasoningDetails,
+          }
+        : null;
+      const reasoning = requireExplanation
+        ? null
+        : (adapterResult.reasoning ?? null);
+
+      const parsed = parseStructuredResponse(
+        pending,
+        adapterResult.output,
+        requireExplanation,
+      );
       if (!parsed.ok) {
         attempts.push(
           failedAttemptRecord(
@@ -272,8 +298,8 @@ export class GameOrchestrator {
             parsed.message,
             startedAt,
             completedAt,
-            adapterResult.reasoning ?? null,
-            adapterResult.metadata ?? null,
+            reasoning,
+            responseMetadata,
           ),
         );
         continue;
@@ -281,15 +307,21 @@ export class GameOrchestrator {
 
       return {
         response: {
-          action: parsed.action,
-          reasoning: adapterResult.reasoning ?? null,
+          action: resolveSeatAction(
+            parsed.action,
+            (seat) =>
+              state.players.find((player) => player.seat + 1 === seat)?.id ??
+              `invalid-seat-${seat}`,
+          ),
+          reasoning,
+          moveExplanation: parsed.explanation,
           callId,
           modelId,
           responseAttempt,
           startedAt,
           completedAt,
           latencyMs: Math.max(0, completedAt - startedAt),
-          responseMetadata: adapterResult.metadata ?? null,
+          responseMetadata,
         },
         attempts,
       };
@@ -374,6 +406,7 @@ function successRecord(
     message: null,
     structuredAction: response.action,
     reasoning: response.reasoning,
+    moveExplanation: response.moveExplanation,
     startedAt: response.startedAt,
     completedAt: response.completedAt,
     latencyMs: response.latencyMs,
@@ -398,6 +431,7 @@ function illegalActionRecord(
     message: error.message,
     structuredAction: response.action,
     reasoning: response.reasoning,
+    moveExplanation: response.moveExplanation,
     startedAt: response.startedAt,
     completedAt: response.completedAt,
     latencyMs: response.latencyMs,

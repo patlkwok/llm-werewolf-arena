@@ -2,7 +2,9 @@
 
 LLM Werewolf Arena is a local-first web app for watching six to twelve model-powered players play Werewolf. You choose their names and OpenRouter models; the app assigns hidden roles and runs the game. A deterministic game engine validates every proposed action, resolves votes and night outcomes, and keeps the authoritative state. The human operator can inspect public discussion, private actions, available reasoning, and usage diagnostics.
 
-Each supported player count has a fixed role preset with one Seer, one Doctor, one to three Werewolves, and Villagers filling the remaining seats. Games begin at Night 0. Players know the starting role counts and their own roles; Werewolves also know their teammates. Player names must be unique (ignoring capitalization), but multiple players may use the same model.
+Each supported player count starts with the v1.1 role preset shown below. You can change the distribution for each new game: choose 1 through one third of the players as Werewolves (rounded down), exactly one Seer, zero or one Doctor, and zero or one Witch. Villagers fill the remaining seats. Games begin at Night 0. Players know the starting role counts and their own roles; Werewolves also know their teammates. Player names must be unique (ignoring capitalization), but multiple players may use the same model.
+
+Model prompts show each player's chosen name with a seat number starting at 1. Models select action targets by seat number and are asked to use names in public statements. The server translates seats to internal player IDs before the game engine validates actions; saved games retain those IDs.
 
 | Players | Werewolves | Seer | Doctor | Villagers |
 | ---: | ---: | ---: | ---: | ---: |
@@ -41,11 +43,11 @@ npm run start
 
 Run these commands from the project directory. On Windows PowerShell, use `npm.cmd` in place of `npm` if script-execution policy blocks `npm`. On macOS and Linux, use `npm` as shown. If installing the native SQLite dependency fails, install your platform's C/C++ build tools and Python, then retry `npm ci`.
 
-Open [http://localhost:3000](http://localhost:3000). Go to **OpenRouter settings** from the main page, paste your API key, and select **Save key**. The key is verified and held only in the server process's memory; enter it again after restarting the server. You do not need a `.env.local` file for normal use.
+Open [http://localhost:3000](http://localhost:3000). Go to **OpenRouter settings** from the main page, paste your API key, and select **Save key**. The key is verified and held only in the server process's memory. To retain a key across server restarts, create a project-root `.env.local` file with `OPENROUTER_API_KEY=your-key`, then restart the server. The server reads this file automatically; the Settings form remains available for a temporary replacement key.
 
-On the main page, add or remove players to seat between six and twelve, give each player a distinct name, choose an eligible text model for each seat, select any house rules, and start the game. The fixed role preset is shown before launch and updates with the player count. During play you can pause, resume, step one action at a time, or end the game early. You can return to any ongoing game from the main page. Saved games can be reopened or deleted from **Browse saved games**.
+On the main page, add or remove players to seat between six and twelve, give each player a distinct name, choose an eligible text model for each seat, adjust the role distribution, select any house rules, and start the game. The v1.1 preset is selected when the player count changes. During play you can pause, resume, step one action at a time, or end the game early. You can return to any ongoing game from the main page. Saved games can be reopened or deleted from **Browse saved games**.
 
-The spectator view shows all roles and hidden actions. Player prompts receive only information that player is entitled to know. Available provider reasoning and operator diagnostics are spectator-only; some providers return only encrypted reasoning, which cannot be displayed as text.
+The spectator view normally shows all roles and hidden actions. Turn on **Hide spoilers until game ends** to see only public game information while play is active; roles revealed on departure still appear if that house rule is on. All roles, night actions, explanations, and diagnostics appear after the game ends. Player prompts receive only information that player is entitled to know. Available provider reasoning and operator diagnostics are spectator-only; some providers return only encrypted reasoning, which cannot be displayed as text. **Require move explanations** asks each model for a short private explanation with every action and keeps it out of other players' prompts.
 
 ## House rules
 
@@ -53,11 +55,13 @@ The setup page offers four optional rules: reveal roles on departure, exiled-pla
 
 The Doctor may protect themselves but cannot protect the same person on consecutive nights. Protecting someone on Nights 1 and 3, with a different target on Night 2, is allowed.
 
+The Witch is on the Village team. After the Werewolves choose a target, she learns that intended target and may use a once-per-game save potion on them, a once-per-game elimination potion on another living player, both, or neither. She can save herself if targeted. A Witch targeted that night still acts before departures resolve. The Doctor protects only against Werewolf attacks, not the Witch's elimination potion. Up to two players can depart overnight.
+
 ## Local data and security
 
 Game history and model-call telemetry are stored in a local SQLite database at `data/llm-werewolf.db` by default, including SQLite's `-wal` and `-shm` sidecar files. The `data/` directory and database files are Git-ignored. A custom `DATABASE_URL` can change the storage path; keep that path out of any repository or deployment bundle.
 
-The OpenRouter key saved through Settings is **not** written to the database or sent to the browser after saving. OpenRouter requests originate on the server. As an optional developer fallback, you may set `OPENROUTER_API_KEY` in a local `.env.local`; all `.env*` files are Git-ignored except the empty-value `.env.example`. Never put a real key in `.env.example`, source code, screenshots, or commits.
+The OpenRouter key saved through Settings is **not** written to the database or sent to the browser after saving. OpenRouter requests originate on the server. A project-root `.env.local` persists the key between restarts and is Git-ignored; `.env.example` contains only an empty placeholder. **`.env.local` stores the key as plaintext**, so protect access to your computer and workspace. Git ignore does not encrypt the file and can be overridden with `git add -f`; never force-add it or put a real key in `.env.example`, source code, screenshots, or commits. Encrypted local storage through an operating-system credential vault is not currently built into the app.
 
 This app has no user authentication. The included `dev` and `start` scripts bind to the local loopback interface only. Run it on a trusted machine; do not expose the server or its spectator/diagnostic endpoints to the public internet, including through a reverse proxy or tunnel.
 

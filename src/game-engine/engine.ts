@@ -27,6 +27,7 @@ import {
   type VoteAction,
   type WerewolfProposalAction,
   type WerewolfResponseAction,
+  type WitchAction,
 } from "./types";
 
 function success(state: GameState): EngineResult<GameState> {
@@ -119,6 +120,23 @@ export function getPendingAction(state: GameState): PendingAction | null {
         proposalTargetId: attempt.targetPlayerId,
       };
     }
+    case Phase.NIGHT_WITCH: {
+      const witch = playersWithRole(state.players, Role.WITCH, true)[0];
+      if (!witch) return null;
+      const potions = state.witchPotions;
+      return {
+        kind: "WITCH_ACT",
+        playerId: witch.id,
+        werewolfTargetId: state.currentNight?.selectedTargetId ?? null,
+        canSave: Boolean(
+          potions?.saveAvailable && state.currentNight?.selectedTargetId,
+        ),
+        canEliminate: Boolean(potions?.eliminationAvailable),
+        legalEliminationTargetIds: livingPlayers(state.players)
+          .filter((player) => player.id !== witch.id)
+          .map((player) => player.id),
+      };
+    }
     case Phase.DAY_DISCUSSION: {
       const day = state.currentDay;
       if (!day) return null;
@@ -197,6 +215,9 @@ export function applyAction(
         return wrongAction("agree or disagree");
       }
       return applyWerewolfResponse(state, action, "MODEL");
+    case "WITCH_ACT":
+      if (action.action !== "use_potions") return wrongAction("use_potions");
+      return applyWitchAction(state, pending, action, "MODEL");
     case "DISCUSS":
       if (action.action !== "speak" && action.action !== "pass") {
         return wrongAction("speak or pass");
@@ -265,6 +286,9 @@ export function applyFallback(state: GameState): EngineResult<GameState> {
     }
     case "WEREWOLF_RESPOND":
       recordWerewolfResponse(next, pending.playerId, "DISAGREE", "FALLBACK");
+      break;
+    case "WITCH_ACT":
+      recordWitchAction(next, pending.playerId, false, null, "FALLBACK");
       break;
     case "DISCUSS":
       recordDiscussion(next, { action: "pass" }, "FALLBACK");
@@ -448,7 +472,7 @@ function applyWerewolfProposal(
   );
   if (responders.length === 0) {
     attempt.succeeded = true;
-    resolveNight(next, action.targetPlayerId);
+    beginWitchOrResolve(next, action.targetPlayerId);
   } else {
     next.phase = Phase.NIGHT_WEREWOLF_RESPONSES;
   }
@@ -475,6 +499,74 @@ function applyWerewolfResponse(
     source,
   );
   return success(next);
+}
+
+function applyWitchAction(
+  state: GameState,
+  pending: Extract<PendingAction, { kind: "WITCH_ACT" }>,
+  action: WitchAction,
+  source: ActionSource,
+): EngineResult<GameState> {
+  if (action.useSavePotion && !pending.canSave) {
+    return failure(
+      "WITCH_POTION_UNAVAILABLE",
+      "The save potion is unavailable or there is no Werewolf target.",
+    );
+  }
+  if (action.eliminatePlayerId !== null && !pending.canEliminate) {
+    return failure(
+      "WITCH_POTION_UNAVAILABLE",
+      "The elimination potion is unavailable.",
+    );
+  }
+  if (
+    action.eliminatePlayerId !== null &&
+    !pending.legalEliminationTargetIds.includes(action.eliminatePlayerId)
+  ) {
+    return failure(
+      "WITCH_TARGET_NOT_ALLOWED",
+      "The Witch must eliminate another living player.",
+    );
+  }
+  const next = cloneState(state);
+  recordWitchAction(
+    next,
+    pending.playerId,
+    action.useSavePotion,
+    action.eliminatePlayerId,
+    source,
+  );
+  return success(next);
+}
+
+function recordWitchAction(
+  state: GameState,
+  playerId: PlayerId,
+  usedSavePotion: boolean,
+  eliminationTargetId: PlayerId | null,
+  source: ActionSource,
+): void {
+  const night = state.currentNight!;
+  night.witchSaved = usedSavePotion;
+  night.witchEliminationTargetId = eliminationTargetId;
+  if (usedSavePotion) state.witchPotions!.saveAvailable = false;
+  if (eliminationTargetId) state.witchPotions!.eliminationAvailable = false;
+  emitGameEvent(
+    state,
+    "WITCH_ACTED",
+    {
+      playerId,
+      werewolfTargetId: night.selectedTargetId,
+      usedSavePotion,
+      eliminationTargetId,
+      source,
+    },
+    {
+      visibility: EventVisibility.PLAYER_PRIVATE,
+      audiencePlayerIds: [playerId],
+    },
+  );
+  resolveNight(state, night.selectedTargetId);
 }
 
 function applyDiscussionAction(
@@ -627,7 +719,7 @@ function recordWerewolfResponse(
     (item) => item.response === "AGREE",
   );
   if (attempt.succeeded) {
-    resolveNight(state, attempt.targetPlayerId);
+    beginWitchOrResolve(state, attempt.targetPlayerId);
   } else {
     finishFailedWerewolfAttempt(state);
   }
@@ -652,7 +744,24 @@ function finishFailedWerewolfAttempt(state: GameState): void {
   if (attempt.attemptNumber === 1 && state.rules.werewolfReproposal) {
     beginWerewolfAttempt(state, 2);
   } else {
-    resolveNight(state, null);
+    beginWitchOrResolve(state, null);
+  }
+}
+
+function beginWitchOrResolve(
+  state: GameState,
+  selectedTargetId: PlayerId | null,
+): void {
+  state.currentNight!.selectedTargetId = selectedTargetId;
+  const witch = playersWithRole(state.players, Role.WITCH, true)[0];
+  if (
+    witch &&
+    ((state.witchPotions?.saveAvailable && selectedTargetId) ||
+      state.witchPotions?.eliminationAvailable)
+  ) {
+    state.phase = Phase.NIGHT_WITCH;
+  } else {
+    resolveNight(state, selectedTargetId);
   }
 }
 
@@ -670,7 +779,7 @@ function resolveNight(
     )
       ? "NO_PROPOSAL"
       : "NO_AGREEMENT";
-  } else if (night.doctorTargetId === selectedTargetId) {
+  } else if (night.doctorTargetId === selectedTargetId || night.witchSaved) {
     night.outcome = "PROTECTED";
   } else {
     const target = requiredPlayer(state, selectedTargetId);
@@ -684,6 +793,30 @@ function resolveNight(
     night.outcome = "ELIMINATED";
   }
 
+  const poisonTargetId = night.witchEliminationTargetId ?? null;
+  if (poisonTargetId) {
+    const target = requiredPlayer(state, poisonTargetId);
+    if (target.isAlive) {
+      target.isAlive = false;
+      target.departure = {
+        kind: DepartureKind.NIGHT_ELIMINATION,
+        dayNumber: state.dayNumber,
+        nightNumber: state.nightNumber,
+      };
+      night.witchEliminatedPlayerId = poisonTargetId;
+    }
+  }
+  const departures = [
+    ...new Set(
+      [night.eliminatedPlayerId, night.witchEliminatedPlayerId ?? null].filter(
+        (id): id is PlayerId => id !== null,
+      ),
+    ),
+  ].sort(
+    (left, right) =>
+      requiredPlayer(state, left).seat - requiredPlayer(state, right).seat,
+  );
+
   emitGameEvent(
     state,
     "NIGHT_RESOLUTION_DETAIL",
@@ -692,6 +825,9 @@ function resolveNight(
       outcome: night.outcome,
       selectedTargetId,
       protectedTargetId: night.doctorTargetId,
+      witchSavedTargetId: night.witchSaved ? selectedTargetId : null,
+      witchEliminationTargetId: night.witchEliminationTargetId ?? null,
+      witchEliminatedPlayerId: night.witchEliminatedPlayerId ?? null,
     },
     { visibility: EventVisibility.SPECTATOR_ONLY },
   );
@@ -700,12 +836,12 @@ function resolveNight(
     "NIGHT_RESOLVED",
     {
       nightNumber: night.nightNumber,
-      eliminatedPlayerId: night.eliminatedPlayerId,
+      eliminatedPlayerIds: departures,
     },
     { visibility: EventVisibility.PUBLIC },
   );
-  if (night.eliminatedPlayerId) {
-    const eliminated = requiredPlayer(state, night.eliminatedPlayerId);
+  for (const departedId of departures) {
+    const eliminated = requiredPlayer(state, departedId);
     emitGameEvent(
       state,
       "PLAYER_ELIMINATED",
@@ -726,19 +862,24 @@ function resolveNight(
     state,
     night.initialWerewolfProposerId,
   );
-  state.werewolfProposerSeat = nextLivingSeat(
-    state.players,
-    initialProposer.seat,
-    (player) => player.role === Role.WEREWOLF,
-  );
+  if (playersWithRole(state.players, Role.WEREWOLF, true).length > 0) {
+    state.werewolfProposerSeat = nextLivingSeat(
+      state.players,
+      initialProposer.seat,
+      (player) => player.role === Role.WEREWOLF,
+    );
+  }
   state.nightHistory.push(structuredClone(night));
   state.currentNight = null;
 
-  const winner = evaluateWinner(state.players, "NIGHT_END");
+  const winner = evaluateWinner(state.players, "NIGHT_END", state.witchPotions);
   if (winner) {
     endGame(state, winner);
   } else {
-    beginDay(state, night.eliminatedPlayerId);
+    beginDay(
+      state,
+      night.eliminatedPlayerId ?? night.witchEliminatedPlayerId ?? null,
+    );
   }
 }
 
@@ -937,7 +1078,7 @@ function finishDay(state: GameState): void {
   if (!day) throw new Error("Invariant violation: no day to finish.");
   state.dayHistory.push(structuredClone(day));
   state.currentDay = null;
-  const winner = evaluateWinner(state.players, "DAY_END");
+  const winner = evaluateWinner(state.players, "DAY_END", state.witchPotions);
   if (winner) {
     endGame(state, winner);
   } else {

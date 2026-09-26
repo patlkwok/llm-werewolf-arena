@@ -57,45 +57,58 @@ export class RuleBasedFakeAdapter implements ModelAdapter {
   async requestAction(request: ModelTurnRequest): Promise<ModelAdapterResult> {
     this.requests.push(structuredClone(request));
     const action = request.action;
+    const seatFor = (playerId: string): number => {
+      const player = request.observation.authoritative.players.find(
+        (candidate) => candidate.playerId === playerId,
+      );
+      if (!player) throw new Error(`Unknown fake-adapter player ${playerId}.`);
+      return player.seat + 1;
+    };
+    const reply = (output: Record<string, unknown>): ModelAdapterResult => ({
+      ok: true,
+      output: (request.responseJsonSchema.required as string[]).includes(
+        "explanation",
+      )
+        ? {
+            ...output,
+            explanation:
+              "I chose this legal move based on the current game state.",
+          }
+        : output,
+    });
     switch (action.kind) {
       case "DOCTOR_PROTECT":
-        return {
-          ok: true,
-          output: {
-            action: "protect",
-            targetPlayerId: action.legalTargetIds[0],
-          },
-        };
+        return reply({
+          action: "protect",
+          targetSeat: seatFor(action.legalTargetIds[0]!),
+        });
       case "SEER_INSPECT":
-        return {
-          ok: true,
-          output: {
-            action: "inspect",
-            targetPlayerId: action.legalTargetIds[0],
-          },
-        };
+        return reply({
+          action: "inspect",
+          targetSeat: seatFor(action.legalTargetIds[0]!),
+        });
       case "WEREWOLF_PROPOSE":
-        return {
-          ok: true,
-          output: {
-            action: "propose_elimination",
-            targetPlayerId: action.legalTargetIds[0],
-          },
-        };
+        return reply({
+          action: "propose_elimination",
+          targetSeat: seatFor(action.legalTargetIds[0]!),
+        });
       case "WEREWOLF_RESPOND":
-        return { ok: true, output: { action: "agree" } };
+        return reply({ action: "agree" });
+      case "WITCH_ACT":
+        return reply({
+          action: "use_potions",
+          useSavePotion: false,
+          eliminateSeat: null,
+        });
       case "DISCUSS":
-        return { ok: true, output: { action: "pass" } };
+        return reply({ action: "pass" });
       case "VOTE":
-        return {
-          ok: true,
-          output: { action: "vote", targetPlayerId: action.legalTargetIds[0] },
-        };
+        return reply({
+          action: "vote",
+          targetSeat: seatFor(action.legalTargetIds[0]!),
+        });
       case "FINAL_WORDS":
-        return {
-          ok: true,
-          output: { action: "final_words", message: "Good luck, village." },
-        };
+        return reply({ action: "final_words", message: "Good luck, village." });
     }
   }
 }

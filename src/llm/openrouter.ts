@@ -139,6 +139,9 @@ export class OpenRouterAdapter implements ModelAdapter {
           body: JSON.stringify({
             model: request.modelId,
             messages: request.messages,
+            ...(request.excludeReasoningFromResponse
+              ? { reasoning: { exclude: true } }
+              : {}),
             response_format: {
               type: "json_schema",
               json_schema: {

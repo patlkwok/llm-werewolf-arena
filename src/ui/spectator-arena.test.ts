@@ -94,5 +94,111 @@ describe("spectator timeline presentation", () => {
       "417 reasoning tokens were used, but the provider returned only encrypted reasoning and no spectator-visible summary.",
     );
     expect(visibleReasoning(call)).not.toContain("opaque-provider-data");
+    expect(visibleReasoning(call, true)).toBe(
+      "No valid move explanation was returned.",
+    );
+  });
+
+  it("uses move explanations in place of provider reasoning when required", () => {
+    const call = {
+      reasoningText: "provider private reasoning",
+      reasoningTokens: 372,
+      moveExplanation: "I chose a player whose claim I doubt.",
+    } as ModelCallRow;
+    expect(visibleReasoning(call, true)).toBe(
+      "I chose a player whose claim I doubt.",
+    );
+  });
+
+  it("explains Witch effects in both new and older night records", () => {
+    const state = testGame({
+      gameId: "witch-night-description",
+      roleCounts: { WEREWOLF: 2, SEER: 1, DOCTOR: 1, WITCH: 1, VILLAGER: 3 },
+    });
+    const target = state.players[0]!;
+    const poisonTarget = state.players[1]!;
+    const detail = {
+      sequence: 8,
+      type: "NIGHT_RESOLUTION_DETAIL",
+      visibility: EventVisibility.SPECTATOR_ONLY,
+      audiencePlayerIds: [],
+      payload: {
+        nightNumber: 0,
+        outcome: "PROTECTED",
+        selectedTargetId: target.id,
+        protectedTargetId: null,
+        witchSavedTargetId: target.id,
+        witchEliminationTargetId: poisonTarget.id,
+        witchEliminatedPlayerId: poisonTarget.id,
+      },
+    } as const satisfies GameEvent;
+    expect(eventDescription(detail, state)).toContain(
+      `Doctor protection: none · Witch save: ${target.displayName} · Witch elimination potion: eliminated ${poisonTarget.displayName}`,
+    );
+
+    const witchAction: GameEvent = {
+      sequence: 7,
+      type: "WITCH_ACTED",
+      visibility: EventVisibility.PLAYER_PRIVATE,
+      audiencePlayerIds: [poisonTarget.id],
+      payload: {
+        playerId: poisonTarget.id,
+        werewolfTargetId: target.id,
+        usedSavePotion: true,
+        eliminationTargetId: null,
+        source: "MODEL",
+      },
+    };
+    state.events.push(witchAction);
+    const legacy = {
+      ...detail,
+      payload: {
+        nightNumber: 0,
+        outcome: "PROTECTED",
+        selectedTargetId: target.id,
+        protectedTargetId: null,
+      },
+    } as unknown as GameEvent;
+    expect(eventDescription(legacy, state)).toContain(
+      `Doctor protection: none · Witch save: ${target.displayName} · Witch elimination potion: unused`,
+    );
+  });
+
+  it("omits role details for roles absent from the game", () => {
+    const noWitch = testGame();
+    const target = noWitch.players[0]!;
+    const detail: GameEvent = {
+      sequence: 8,
+      type: "NIGHT_RESOLUTION_DETAIL",
+      visibility: EventVisibility.SPECTATOR_ONLY,
+      audiencePlayerIds: [],
+      payload: {
+        nightNumber: 0,
+        outcome: "ELIMINATED",
+        selectedTargetId: target.id,
+        protectedTargetId: null,
+        witchSavedTargetId: null,
+        witchEliminationTargetId: null,
+        witchEliminatedPlayerId: null,
+      },
+    };
+    const doctorOnly = eventDescription(detail, noWitch);
+    expect(doctorOnly).toContain("Doctor protection: none");
+    expect(doctorOnly).not.toContain("Witch");
+
+    const noDoctor = testGame({
+      roleCounts: { WEREWOLF: 2, SEER: 1, DOCTOR: 0, WITCH: 1, VILLAGER: 4 },
+    });
+    const witchOnly = eventDescription(detail, noDoctor);
+    expect(witchOnly).not.toContain("Doctor protection");
+    expect(witchOnly).toContain("Witch save: none");
+    expect(witchOnly).toContain("Witch elimination potion: unused");
+
+    const neither = testGame({
+      roleCounts: { WEREWOLF: 2, SEER: 1, DOCTOR: 0, WITCH: 0, VILLAGER: 5 },
+    });
+    expect(eventDescription(detail, neither)).toBe(
+      `Werewolf attack: eliminated ${target.displayName}.`,
+    );
   });
 });

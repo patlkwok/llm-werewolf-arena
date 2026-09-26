@@ -85,6 +85,7 @@ export const modelCalls = sqliteTable(
     errorMessage: text("error_message"),
     structuredActionJson: text("structured_action_json"),
     reasoningText: text("reasoning_text"),
+    moveExplanation: text("move_explanation"),
     reasoningDetailsJson: text("reasoning_details_json"),
     responseId: text("response_id"),
     responseModelId: text("response_model_id"),

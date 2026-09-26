@@ -6,6 +6,7 @@ export enum Role {
   WEREWOLF = "WEREWOLF",
   SEER = "SEER",
   DOCTOR = "DOCTOR",
+  WITCH = "WITCH",
   VILLAGER = "VILLAGER",
 }
 
@@ -25,6 +26,7 @@ export enum Phase {
   NIGHT_SEER = "NIGHT_SEER",
   NIGHT_WEREWOLF_PROPOSAL = "NIGHT_WEREWOLF_PROPOSAL",
   NIGHT_WEREWOLF_RESPONSES = "NIGHT_WEREWOLF_RESPONSES",
+  NIGHT_WITCH = "NIGHT_WITCH",
   DAY_DISCUSSION = "DAY_DISCUSSION",
   DAY_VOTING = "DAY_VOTING",
   DAY_FINAL_WORDS = "DAY_FINAL_WORDS",
@@ -65,6 +67,13 @@ export interface RuleConfig {
   discussionRounds: 2;
 }
 
+export interface GameOptions {
+  requireMoveExplanation: boolean;
+  hideSpoilersUntilEnd: boolean;
+}
+
+export type RoleCounts = Readonly<Record<Role, number>>;
+
 export const DEFAULT_RULES: Readonly<RuleConfig> = {
   roleRevealOnDeparture: false,
   finalWordsForExiledPlayer: true,
@@ -78,6 +87,11 @@ export type DiscussionAction =
 
 export type DoctorAction = { action: "protect"; targetPlayerId: PlayerId };
 export type SeerAction = { action: "inspect"; targetPlayerId: PlayerId };
+export type WitchAction = {
+  action: "use_potions";
+  useSavePotion: boolean;
+  eliminatePlayerId: PlayerId | null;
+};
 export type WerewolfProposalAction = {
   action: "propose_elimination";
   targetPlayerId: PlayerId;
@@ -92,6 +106,7 @@ export type GameAction =
   | DiscussionAction
   | DoctorAction
   | SeerAction
+  | WitchAction
   | WerewolfProposalAction
   | WerewolfResponseAction
   | VoteAction
@@ -119,6 +134,14 @@ export type PendingAction =
       playerId: PlayerId;
       attemptNumber: 1 | 2;
       proposalTargetId: PlayerId;
+    }
+  | {
+      kind: "WITCH_ACT";
+      playerId: PlayerId;
+      werewolfTargetId: PlayerId | null;
+      canSave: boolean;
+      canEliminate: boolean;
+      legalEliminationTargetIds: PlayerId[];
     }
   | {
       kind: "DISCUSS";
@@ -175,6 +198,9 @@ export interface NightRecord {
   initialWerewolfProposerId: PlayerId;
   selectedTargetId: PlayerId | null;
   eliminatedPlayerId: PlayerId | null;
+  witchSaved?: boolean;
+  witchEliminationTargetId?: PlayerId | null;
+  witchEliminatedPlayerId?: PlayerId | null;
   outcome: NightOutcome | null;
 }
 
@@ -227,6 +253,8 @@ export interface GameState {
   phase: Phase;
   winner: Team | null;
   rules: RuleConfig;
+  options?: GameOptions;
+  witchPotions?: { saveAvailable: boolean; eliminationAvailable: boolean };
   players: GamePlayer[];
   nightNumber: number;
   dayNumber: number;
@@ -251,6 +279,8 @@ export type EngineErrorCode =
   | "TARGET_NOT_LIVING"
   | "SELF_TARGET_NOT_ALLOWED"
   | "CONSECUTIVE_DOCTOR_TARGET"
+  | "WITCH_POTION_UNAVAILABLE"
+  | "WITCH_TARGET_NOT_ALLOWED"
   | "WEREWOLF_TARGET_NOT_ALLOWED"
   | "STRATEGIC_ABSTENTION_DISABLED"
   | "NO_PENDING_ACTION";
@@ -267,4 +297,6 @@ export interface CreateGameOptions {
   seed?: number;
   gameId?: string;
   rules?: Partial<Omit<RuleConfig, "discussionRounds">>;
+  roleCounts?: RoleCounts;
+  experience?: Partial<GameOptions>;
 }

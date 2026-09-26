@@ -40,6 +40,11 @@ export interface UntrustedPlayerMessage {
 export type RolePrivateObservation =
   | { kind: Role.VILLAGER }
   | {
+      kind: Role.WITCH;
+      savePotionAvailable: boolean;
+      eliminationPotionAvailable: boolean;
+    }
+  | {
       kind: Role.DOCTOR;
       lastProtectedPlayerId: PlayerId | null;
       protectionHistory: Array<{

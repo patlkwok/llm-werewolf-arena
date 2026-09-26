@@ -16,7 +16,7 @@ export interface GameControl {
 export interface GameSummary {
   id: string;
   status: GameState["status"];
-  phase: GameState["phase"];
+  phase: GameState["phase"] | "NIGHT";
   winner: GameState["winner"];
   dayNumber: number;
   nightNumber: number;
@@ -134,7 +134,12 @@ export class GameRepository {
         return {
           id: row.id,
           status: state.status,
-          phase: state.phase,
+          phase:
+            state.options?.hideSpoilersUntilEnd &&
+            state.status === "ACTIVE" &&
+            state.phase.startsWith("NIGHT_")
+              ? "NIGHT"
+              : state.phase,
           winner: state.winner,
           dayNumber: state.dayNumber,
           nightNumber: state.nightNumber,
@@ -231,6 +236,7 @@ export class GameRepository {
             ? JSON.stringify(attempt.structuredAction)
             : null,
           reasoningText: attempt.reasoning,
+          moveExplanation: attempt.moveExplanation ?? null,
           reasoningDetailsJson:
             metadata?.reasoningDetails == null
               ? null

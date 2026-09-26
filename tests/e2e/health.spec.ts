@@ -83,6 +83,76 @@ test("adds and removes players within the six-to-twelve limits", async ({
   await expect(page.locator(".seat-grid article")).toHaveCount(12);
 });
 
+test("configures custom roles and keeps a spoiler-hidden live view public", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByText("2 models available")).toBeVisible();
+  const houseRuleGrids = page.locator(
+    'section[aria-labelledby="rules-heading"] .rule-grid',
+  );
+  expect(
+    await houseRuleGrids.evaluateAll((grids) => ({
+      betweenRows: getComputedStyle(grids[1]!).marginTop,
+      withinGrid: getComputedStyle(grids[1]!).rowGap,
+    })),
+  ).toEqual({ betweenRows: "12px", withinGrid: "12px" });
+  await page.getByRole("button", { name: "Remove player" }).click();
+  await page.getByRole("button", { name: "Remove player" }).click();
+  await page.getByLabel("Werewolf count").selectOption("2");
+  await page.getByLabel("Doctor count").selectOption("0");
+  await page.getByLabel("Witch count").selectOption("1");
+  await expect(
+    page.getByText("2 Werewolves · 1 Seer · 1 Witch · 2 Villagers"),
+  ).toBeVisible();
+  await page.getByLabel("Require move explanations").check();
+  await page.getByLabel("Hide spoilers until game ends").check();
+  await page.getByLabel("Reveal roles on departure").check();
+  await page.getByRole("button", { name: /Begin at Night 0/ }).click();
+  await expect(page).toHaveURL(/\/games\//, { timeout: 15_000 });
+  const view = await page.request.get(`/api${new URL(page.url()).pathname}`);
+  const payload = await view.json();
+  expect(payload.state.status).toBe("ACTIVE");
+  expect(payload.state.players).toHaveLength(6);
+  expect(
+    payload.state.players.every(
+      (player: { role: unknown; modelId: unknown }) =>
+        player.role === null && player.modelId === null,
+    ),
+  ).toBe(true);
+  expect(
+    payload.state.events.every(
+      (event: { visibility: string }) => event.visibility === "PUBLIC",
+    ),
+  ).toBe(true);
+  expect(payload.modelCalls).toEqual([]);
+  expect(JSON.stringify(payload)).not.toContain("ROLES_ASSIGNED");
+  await expect(page.locator(".seat-grid article code")).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Hidden actions" }),
+  ).toHaveCount(0);
+  page.once("dialog", (dialog) => void dialog.accept());
+  const endGame = page.getByRole("button", { name: "End game" });
+  await expect(endGame).toBeEnabled();
+  await endGame.click();
+  await expect(page.locator(".seat-grid article small")).toHaveCount(6);
+  const finished = await page.request.get(
+    `/api${new URL(page.url()).pathname}`,
+  );
+  const finalView = await finished.json();
+  expect(finalView.state.status).toBe("ABANDONED");
+  expect(
+    finalView.state.players.every(
+      (player: { role: unknown }) => player.role !== null,
+    ),
+  ).toBe(true);
+  expect(
+    finalView.state.events.some(
+      (event: { type: string }) => event.type === "ROLES_ASSIGNED",
+    ),
+  ).toBe(true);
+});
+
 test("blocks case-insensitive duplicate player names", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("2 models available")).toBeVisible();

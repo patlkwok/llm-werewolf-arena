@@ -54,7 +54,8 @@ export function reachDayWithNoDeparture(state: GameState): GameState {
     next.phase === Phase.NIGHT_DOCTOR ||
     next.phase === Phase.NIGHT_SEER ||
     next.phase === Phase.NIGHT_WEREWOLF_PROPOSAL ||
-    next.phase === Phase.NIGHT_WEREWOLF_RESPONSES
+    next.phase === Phase.NIGHT_WEREWOLF_RESPONSES ||
+    next.phase === Phase.NIGHT_WITCH
   ) {
     next = fallback(next);
   }

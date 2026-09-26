@@ -416,6 +416,10 @@ select:disabled {
   gap: 0.75rem;
 }
 
+.rule-grid + .rule-grid {
+  margin-top: 0.75rem;
+}
+
 .rule-card {
   position: relative;
   display: flex;
@@ -447,6 +451,11 @@ select:disabled {
   color: var(--muted);
   font-size: 0.76rem;
   line-height: 1.45;
+}
+
+.rule-card select {
+  flex: 0 0 5.4rem;
+  width: 5.4rem;
 }
 
 .rule-card input {

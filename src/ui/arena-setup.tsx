@@ -6,7 +6,9 @@ import {
   DEFAULT_PLAYER_COUNT,
   MAX_PLAYER_COUNT,
   MIN_PLAYER_COUNT,
+  roleCountsForPlayerCount,
 } from "@/game-engine/setup";
+import type { RoleCounts } from "@/game-engine/types";
 import {
   DEFAULT_PLAYER_NAMES,
   roleDistributionLabel,
@@ -81,6 +83,13 @@ export function ArenaSetup() {
     })),
   );
   const [rules, setRules] = useState(DEFAULT_RULE_STATE);
+  const [roleCounts, setRoleCounts] = useState<RoleCounts>(
+    roleCountsForPlayerCount(DEFAULT_PLAYER_COUNT)!,
+  );
+  const [experience, setExperience] = useState({
+    requireMoveExplanation: false,
+    hideSpoilersUntilEnd: false,
+  });
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -160,6 +169,8 @@ export function ArenaSetup() {
         },
       ];
     });
+    if (players.length < MAX_PLAYER_COUNT)
+      setRoleCounts(roleCountsForPlayerCount(players.length + 1)!);
     setFormError(null);
   }
 
@@ -167,13 +178,37 @@ export function ArenaSetup() {
     setPlayers((current) =>
       current.length > MIN_PLAYER_COUNT ? current.slice(0, -1) : current,
     );
+    if (players.length > MIN_PLAYER_COUNT)
+      setRoleCounts(roleCountsForPlayerCount(players.length - 1)!);
+    setFormError(null);
+  }
+
+  function updateRoleCount(
+    role: "WEREWOLF" | "DOCTOR" | "WITCH",
+    count: number,
+  ) {
+    setRoleCounts((current) => ({
+      ...current,
+      [role]: count,
+      VILLAGER:
+        players.length -
+        1 -
+        (role === "WEREWOLF" ? count : current.WEREWOLF) -
+        (role === "DOCTOR" ? count : current.DOCTOR) -
+        (role === "WITCH" ? count : current.WITCH),
+    }));
     setFormError(null);
   }
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
-    const parsed = setupSubmissionSchema.safeParse({ players, rules });
+    const parsed = setupSubmissionSchema.safeParse({
+      players,
+      roleCounts,
+      rules,
+      experience,
+    });
     if (!parsed.success) {
       setFormError(
         parsed.error.issues[0]?.message ?? "Check the setup fields.",
@@ -319,15 +354,125 @@ export function ArenaSetup() {
         </p>
       </section>
 
-      <section className="setup-section" aria-labelledby="rules-heading">
+      <section className="setup-section" aria-labelledby="roles-heading">
         <div className="section-heading">
           <div>
             <p className="section-number">02</p>
+            <h2 id="roles-heading">Choose the roles</h2>
+          </div>
+          <p className="fixed-rules">
+            {players.length} seats · 1 Seer · Villagers fill the rest
+          </p>
+        </div>
+        <div className="rule-grid">
+          <label className="rule-card">
+            <span>
+              <strong>Werewolves</strong>
+              <small>1 to {Math.floor(players.length / 3)}</small>
+            </span>
+            <select
+              aria-label="Werewolf count"
+              value={roleCounts.WEREWOLF}
+              onChange={(event) =>
+                updateRoleCount("WEREWOLF", Number(event.target.value))
+              }
+            >
+              {Array.from(
+                { length: Math.floor(players.length / 3) },
+                (_, index) => index + 1,
+              ).map((count) => (
+                <option key={count} value={count}>
+                  {count}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="rule-card">
+            <span>
+              <strong>Doctor</strong>
+              <small>Protects from Werewolf attacks</small>
+            </span>
+            <select
+              aria-label="Doctor count"
+              value={roleCounts.DOCTOR}
+              onChange={(event) =>
+                updateRoleCount("DOCTOR", Number(event.target.value))
+              }
+            >
+              <option value={0}>0</option>
+              <option value={1}>1</option>
+            </select>
+          </label>
+          <label className="rule-card">
+            <span>
+              <strong>Witch</strong>
+              <small>One save and one elimination potion</small>
+            </span>
+            <select
+              aria-label="Witch count"
+              value={roleCounts.WITCH}
+              onChange={(event) =>
+                updateRoleCount("WITCH", Number(event.target.value))
+              }
+            >
+              <option value={0}>0</option>
+              <option value={1}>1</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section className="setup-section" aria-labelledby="rules-heading">
+        <div className="section-heading">
+          <div>
+            <p className="section-number">03</p>
             <h2 id="rules-heading">Choose the house rules</h2>
           </div>
           <p className="fixed-rules">
             Fixed: {players.length} seats · 2 discussion rounds · Night 0
           </p>
+        </div>
+        <div className="rule-grid">
+          <label className="rule-card">
+            <span>
+              <strong>Require move explanations</strong>
+              <small>
+                Each model gives a short private explanation for the operator.
+                This replaces provider reasoning in the game view.
+              </small>
+            </span>
+            <input
+              type="checkbox"
+              checked={experience.requireMoveExplanation}
+              onChange={(event) =>
+                setExperience((current) => ({
+                  ...current,
+                  requireMoveExplanation: event.target.checked,
+                }))
+              }
+            />
+            <i aria-hidden="true" />
+          </label>
+          <label className="rule-card">
+            <span>
+              <strong>Hide spoilers until game ends</strong>
+              <small>
+                Show only information a Villager could know while the game is
+                active.
+              </small>
+            </span>
+            <input
+              type="checkbox"
+              checked={experience.hideSpoilersUntilEnd}
+              onChange={(event) =>
+                setExperience((current) => ({
+                  ...current,
+                  hideSpoilersUntilEnd: event.target.checked,
+                }))
+              }
+            />
+            <i aria-hidden="true" />
+          </label>
         </div>
         <div className="rule-grid">
           {RULES.map((rule) => (
@@ -355,7 +500,7 @@ export function ArenaSetup() {
       <footer className="launch-bar">
         <div>
           <p>Roles are assigned only after launch.</p>
-          <span>{roleDistributionLabel(players.length)}</span>
+          <span>{roleDistributionLabel(players.length, roleCounts)}</span>
         </div>
         {formError && (
           <p className="form-error" role="alert">

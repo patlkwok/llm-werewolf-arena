@@ -1,4 +1,8 @@
-import { EventVisibility, type GameEvent } from "@/game-engine/events";
+import {
+  EventVisibility,
+  publicGameEvent,
+  type GameEvent,
+} from "@/game-engine/events";
 import { getPendingAction } from "@/game-engine/engine";
 import {
   type GamePlayer,
@@ -73,7 +77,7 @@ function projectPublicEvent(
   return {
     sequence: event.sequence,
     type: event.type,
-    payload: structuredClone(event.payload),
+    payload: structuredClone(publicGameEvent(event).payload),
   };
 }
 
@@ -85,6 +89,18 @@ function projectPrivateEvent(event: GameEvent): ObservationHistoryEvent {
       payload: {
         playerId: event.payload.playerId,
         targetPlayerId: event.payload.targetPlayerId,
+      },
+    };
+  }
+  if (event.type === "WITCH_ACTED") {
+    return {
+      sequence: event.sequence,
+      type: event.type,
+      payload: {
+        playerId: event.payload.playerId,
+        werewolfTargetId: event.payload.werewolfTargetId,
+        usedSavePotion: event.payload.usedSavePotion,
+        eliminationTargetId: event.payload.eliminationTargetId,
       },
     };
   }
@@ -103,6 +119,13 @@ function rolePrivateObservation(
   switch (player.role) {
     case Role.VILLAGER:
       return { kind: Role.VILLAGER };
+    case Role.WITCH:
+      return {
+        kind: Role.WITCH,
+        savePotionAvailable: state.witchPotions?.saveAvailable ?? false,
+        eliminationPotionAvailable:
+          state.witchPotions?.eliminationAvailable ?? false,
+      };
     case Role.DOCTOR:
       return {
         kind: Role.DOCTOR,
@@ -171,6 +194,7 @@ export function buildPlayerObservation(
       [Role.WEREWOLF]: 0,
       [Role.SEER]: 0,
       [Role.DOCTOR]: 0,
+      [Role.WITCH]: 0,
       [Role.VILLAGER]: 0,
     },
   );

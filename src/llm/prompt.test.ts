@@ -23,6 +23,7 @@ describe("player prompts", () => {
           WEREWOLF: 2,
           SEER: 1,
           DOCTOR: 1,
+          WITCH: 0,
           VILLAGER: 4,
         },
         phase: "DAY_DISCUSSION",
@@ -63,6 +64,10 @@ describe("player prompts", () => {
     expect(prompt).toContain("with other players");
     expect(prompt).toContain('"initialPlayerCount": 8');
     expect(prompt).toContain('"WEREWOLF": 2');
+    expect(prompt).toContain(
+      "Use seat numbers in structured action target fields",
+    );
+    expect(prompt).toContain("player display names when referring to players");
     expect(prompt).not.toMatch(/\b(?:AI|LLM|model|provider|bot|automated)\b/i);
   });
 });

@@ -40,13 +40,26 @@ export interface GameEventPayloads {
     attemptNumber: 1 | 2;
   };
   WEREWOLF_PROPOSAL_FAILED: { attemptNumber: 1 | 2 };
+  WITCH_ACTED: {
+    playerId: PlayerId;
+    werewolfTargetId: PlayerId | null;
+    usedSavePotion: boolean;
+    eliminationTargetId: PlayerId | null;
+    source: ActionSource;
+  };
   NIGHT_RESOLUTION_DETAIL: {
     nightNumber: number;
     outcome: NightOutcome;
     selectedTargetId: PlayerId | null;
     protectedTargetId: PlayerId | null;
+    witchSavedTargetId: PlayerId | null;
+    witchEliminationTargetId: PlayerId | null;
+    witchEliminatedPlayerId: PlayerId | null;
   };
-  NIGHT_RESOLVED: { nightNumber: number; eliminatedPlayerId: PlayerId | null };
+  NIGHT_RESOLVED: {
+    nightNumber: number;
+    eliminatedPlayerIds: PlayerId[];
+  };
   PLAYER_ELIMINATED: { playerId: PlayerId; nightNumber: number };
   DAY_STARTED: { dayNumber: number; speakingOrder: PlayerId[] };
   DISCUSSION_ROUND_STARTED: { dayNumber: number; roundNumber: 1 | 2 };
@@ -62,7 +75,7 @@ export interface GameEventPayloads {
     dayNumber: number;
     playerId: PlayerId;
     targetPlayerId: PlayerId | null;
-    kind: "VOTE" | "STRATEGIC_ABSTAIN" | "FALLBACK_ABSTAIN";
+    kind: "VOTE" | "STRATEGIC_ABSTAIN" | "FALLBACK_ABSTAIN" | "ABSTAIN";
   };
   VOTE_RESOLVED: { dayNumber: number; result: VoteResult };
   PLAYER_EXILED: { playerId: PlayerId; dayNumber: number };
@@ -104,4 +117,11 @@ export function emitGameEvent<Type extends GameEventType>(
     payload,
   } as GameEvent);
   state.nextEventSequence += 1;
+}
+
+export function publicGameEvent(event: GameEvent): GameEvent {
+  if (event.type === "PLAYER_VOTED" && event.payload.kind !== "VOTE") {
+    return { ...event, payload: { ...event.payload, kind: "ABSTAIN" } };
+  }
+  return event;
 }

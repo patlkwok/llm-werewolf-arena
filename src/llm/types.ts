@@ -22,6 +22,7 @@ export interface ModelTurnRequest {
   schemaName: string;
   responseJsonSchema: Record<string, unknown>;
   messages: ModelMessage[];
+  excludeReasoningFromResponse?: boolean;
 }
 
 export interface ModelUsage {
